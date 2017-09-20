@@ -1,0 +1,80 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!-- saved from url=(0045)https://timsong-cpp.github.io/lwg-issues/2779 -->
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>
+[networking.ts] Remove spurious nested value_type buffer sequence requirement
+</title>
+<style type="text/css">
+  p {text-align:justify}
+  li {text-align:justify}
+  blockquote.note
+  {
+    background-color:#E0E0E0;
+    padding-left: 15px;
+    padding-right: 15px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+  ins {background-color:#A0FFA0}
+  del {background-color:#FFA0A0}
+  table {border-collapse: collapse;}
+</style>
+</head>
+<body>
+<hr>
+<h3>[networking.ts] Relax requirements on buffer sequence iterators</h3>
+<p><b>Submitter:</b> Vinnie Falco</p>
+
+<p>
+The post-condition requirements for <b>ConstBufferSequence</b> and
+<b>MutableBufferSequence</b> refer to <tt>X::value_type</tt>, but no
+such nested type is required. The lambda expression passed to <tt>equal</tt>
+can use <tt>auto const&amp;</tt> parameter types instead.
+</p>
+
+<p><b>Proposed resolution:</b></p>
+<p>
+This wording is relative to
+<a href="http://cplusplus.github.io/networking-ts/draft.pdf">N4695</a>.
+</p>
+
+<ol>
+
+<li>
+<p>
+Modify 16.2.1 [buffer.reqmts.mutablebuffersequence], table 12 as indicated:
+</p>
+<blockquote>
+  <p><del><tt>
+    [](const typename X::value_type&amp; v1,
+       const typename X::value_type&amp; v2)
+  </tt></del></p>
+  <p><ins><tt>
+    [](const auto&amp; v1,
+       const auto&amp; v2)
+  </tt></ins></p>
+</blockquote>
+</li>
+
+<li>
+<p>
+Modify 16.2.2 [buffer.reqmts.constbuffersequence], table 13 as indicated:
+</p>
+<blockquote>
+  <p><del><tt>
+    [](const typename X::value_type&amp; v1,
+       const typename X::value_type&amp; v2)
+  </tt></del></p>
+  <p><ins><tt>
+    [](const auto&amp; v1,
+       const auto&amp; v2)
+  </tt></ins></p>
+</blockquote>
+</li>
+
+</ol>
+
+</body>
+</html>
