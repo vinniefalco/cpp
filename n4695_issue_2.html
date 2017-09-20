@@ -1,0 +1,136 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!-- saved from url=(0045)https://timsong-cpp.github.io/lwg-issues/2779 -->
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>
+[networking.ts] Relax pointer equivalence requirement for ConstBufferSequence
+</title>
+<style type="text/css">
+  p {text-align:justify}
+  li {text-align:justify}
+  blockquote.note
+  {
+    background-color:#E0E0E0;
+    padding-left: 15px;
+    padding-right: 15px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+  ins {background-color:#A0FFA0}
+  del {background-color:#FFA0A0}
+  table {border-collapse: collapse;}
+</style>
+</head>
+<body>
+<hr>
+<h3>[networking.ts] Relax pointer equivalence requirement for ConstBufferSequence</h3>
+<p><b>Submitter:</b> Vinnie Falco</p>
+
+<p>
+The post-condition buffer sequence requirements mandate pointer equivalence.
+This means that a copies of buffer sequences must point to the same pieces
+of underlying memory. While this is appropriate for <b>MutableBufferSequence</b>,
+it is unnecessary for <b>ConstBufferSequence</b> and can actually prevent
+useful implementation strategies such as the following constant buffer
+sequence which avoids dynamic allocations:
+<pre>
+/// A buffer sequence containing a chunk-encoding header
+class chunk_size
+{
+public:
+    // Storage for the longest hex string we might need
+    class value_type
+    {
+        friend class chunk_size;
+
+        // First byte holds the length
+        char buf_[1 + 2 * sizeof(std::size_t)];
+
+        template<class = void>
+        void
+        prepare(std::size_t n);
+
+        template<class OutIter>
+        static
+        OutIter
+        to_hex(OutIter last, std::size_t n)
+        {
+            if(n == 0)
+            {
+                *--last = '0';
+                return last;
+            }
+            while(n)
+            {
+                *--last = "0123456789abcdef"[n&amp;0xf];
+                n>>=4;
+            }
+            return last;
+        }
+    public:
+        operator
+        boost::asio::const_buffer() const
+        {
+            return {
+                buf_ + sizeof(buf_) - buf_[0],
+                static_cast<unsigned>(buf_[0])};
+        }
+    };
+
+    using const_iterator = value_type const*;
+
+    chunk_size(chunk_size const&amp; other) = default;
+
+    /** Construct a chunk header
+
+        @param n The number of octets in this chunk.
+    */
+    chunk_size(std::size_t n)
+    {
+        value_.prepare(n);
+    }
+
+    const_iterator
+    begin() const
+    {
+        return &amp;value_;
+    }
+
+    const_iterator
+    end() const
+    {
+        return begin() + 1;
+    }
+
+private:
+    value_type value_;
+};
+</pre>
+
+<p><b>Proposed resolution:</b></p>
+<p>
+This wording is relative to
+<a href="http://cplusplus.github.io/networking-ts/draft.pdf">N4695</a>.
+</p>
+
+<ol>
+<li>
+<p>
+Modify 16.2.2 [buffer.reqmts.constbuffersequence], table 13 as indicated:
+</p>
+<blockquote>
+  <p><del><tt>
+    return b1.data() == b2.data()
+    &amp;&amp; b1.size() == b2.size();
+  </tt></del></p>
+  <p><ins><tt>
+    return b1.size() == b2.size() &amp;&amp; memcmp(b1.data(), b2.data(), b1.size()) == 0;
+  </tt></ins></p>
+</blockquote>
+</li>
+
+</ol>
+
+</body>
+</html>
