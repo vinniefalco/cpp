@@ -4,7 +4,7 @@
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <title>
-[networking.ts] Relax pointer equivalence requirement for ConstBufferSequence
+[networking.ts] DynamicBuffer parameter behavior specifications
 </title>
 <style type="text/css">
   p {text-align:justify}
@@ -24,10 +24,13 @@
 </head>
 <body>
 <hr>
-<h3>[networking.ts] Relax pointer equivalence requirement for ConstBufferSequence</h3>
+<h3>[networking.ts] DynamicBuffer parameter behavior specifications</h3>
 <p><b>Submitter:</b> Vinnie Falco</p>
 
 <p>
+The specification of the behavior of <b>DynamicBuffer</b> parameters in
+read algorithms is 
+
 The post-condition buffer sequence requirements mandate pointer equivalence.
 This means that a copies of buffer sequences must point to the same pieces
 of underlying memory. While this is appropriate for <b>MutableBufferSequence</b>,
@@ -47,11 +50,11 @@ public:
         // First byte holds the length
         char buf_[1 + 2 * sizeof(std::size_t)];
 
-        template&lt;class = void&gt;
+        template<class = void>
         void
         prepare(std::size_t n);
 
-        template&lt;class OutIter&gt;
+        template<class OutIter>
         static
         OutIter
         to_hex(OutIter last, std::size_t n)
