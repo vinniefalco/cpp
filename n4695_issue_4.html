@@ -1,0 +1,59 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!-- saved from url=(0045)https://timsong-cpp.github.io/lwg-issues/2779 -->
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>
+[networking.ts] DynamicBuffer prepare exception specification
+</title>
+<style type="text/css">
+  p {text-align:justify}
+  li {text-align:justify}
+  blockquote.note
+  {
+    background-color:#E0E0E0;
+    padding-left: 15px;
+    padding-right: 15px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+  ins {background-color:#A0FFA0}
+  del {background-color:#FFA0A0}
+  table {border-collapse: collapse;}
+</style>
+</head>
+<body>
+<hr>
+<h3>[networking.ts] DynamicBuffer prepare exception specification</h3>
+<p><b>Submitter:</b> Vinnie Falco</p>
+
+<p>
+The current wording for the <b>DynamicBuffer</b> <code>prepare</code>
+member function implies that <code>std::length_error</code> is the
+only allowable thrown exception. This should be changed to reflect that
+any exception may be thrown, with <code>std::length_error</code> thrown
+in particular when <code>size() + n exceeds max_size()</code>.
+
+<p><b>Proposed resolution:</b></p>
+<p>
+This wording is relative to
+<a href="http://cplusplus.github.io/networking-ts/draft.pdf">N4695</a>.
+</p>
+
+<ol>
+<li>
+<p>
+Modify 16.2.4 [buffer.reqmts.dynamicbuffer], table 14, row 6 as indicated:
+</p>
+<blockquote>
+  <p><em>Throws:</em> <code>length_error</code> if
+  <code>size() + n</code> exceeds <code>max_size()</code>
+  <ins>or any other exception if the request cannot otherwise
+  be satisfied.</ins>
+</blockquote>
+</li>
+
+</ol>
+
+</body>
+</html>
