@@ -1,0 +1,577 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<title>[networking.ts] Permit efficient composition when using DynamicBuffer</title>
+<style type="text/css">
+  p {text-align:justify}
+  li {text-align:justify}
+  blockquote.note
+  {
+    background-color:#E0E0E0;
+    padding-left: 15px;
+    padding-right: 15px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+  ins {background-color:#A0FFA0}
+  del {background-color:#FFA0A0}
+  table {border-collapse: collapse;}
+</style>
+</head>
+<body>
+<hr>
+<h3>[networking.ts] Permit efficient composition when using DynamicBuffer</h3>
+<p><b>Submitter:</b> Vinnie Falco &lt;<a href="mailto:vinnie.falco@gmail.com">vinnie.falco@gmail.com</a>&gt;</p>
+<p><b>Summary:</b></p>
+<p>
+  The current semantics of <b>DynamicBuffer</b> described in [networking.ts]
+  prevents efficient composition of asynchronous operations which accept
+  a dynamic buffer instance. We propose going back to established practice
+  of receiving dynamic buffers via l-value references in algorithms,
+  instead of forwarding references. This change allows affected asynchronous
+  implementations to omit one or more unnecessary dynamic allocations, and
+  refines <b>DynamicBuffer</b> to be a storage type.
+</p>
+<p><b>Discussion:</b></p>
+
+<p>Asynchronous algorithms are started by a call to an <em>initiating function</em>.
+When these algorithms are constructed from calls to other initiating functions,
+the result is called a <em>composed operation</em>. For example,
+<tt>async_read</tt> may be implemented in terms of zero or more calls to a
+stream's <tt>async_read_some</tt> algorithm. For operations where the caller
+cannot easily determine ahead of time the storage requirements needed for
+an algorithm to meet its post-conditions, [networking.ts] introduces the
+<b>DynamicBuffer</b> concept:
+<blockquote>
+A dynamic buffer encapsulates memory storage that may be automatically
+resized as required, where the memory is divided into two regions: readable
+bytes followed by writable bytes. [buffer.reqmts.dynamicbuffer]
+</blockquote>
+</p>
+<p>
+Signatures for algorithms in the technical specification which accept dynamic
+buffers use forwarding references:
+<blockquote><pre><tt>
+  // 17.10, asynchronous delimited read operations:
+
+  template&lt;
+      class AsyncReadStream,
+      class DynamicBuffer,
+      class CompletionToken&gt;
+  DEDUCED async_read_until(
+    AsyncReadStream& s,
+    DynamicBuffer&amp;&amp; b,
+    char delim,
+    CompletionToken&amp;&amp; token);
+</tt></pre></blockquote>
+</p>
+<p>
+Because the initiating function returns immediately, and the associated
+composed operation executes later, it is necessary for the algorithm to manage
+the lifetime of the dynamic buffer. Guidance for doing so is given in the
+TS:
+</p>
+<blockquote>
+  <b>13.2.7.5 Lifetime of initiating function arguments [async.reqmts.async.lifetime]</b><br>
+  1. Unless otherwise specified, the lifetime of arguments to initiating
+  functions shall be treated as follows:... the implementation does not
+  assume the validity of the argument after the initiating function completes...
+  The implementation may make copies of the argument, and all copies shall be
+  destroyed no later than immediately after invocation of the completion handler.
+</blockquote>
+Given the guidance above, the most sensible approach is for the implementation
+to move or make a decay-copy of the argument. An implementation of the TS,
+authored by the principal architect of the TS itself, does precisely that:
+<blockquote><pre><tt>
+template &lt;
+    typename AsyncReadStream,
+    typename DynamicBuffer,
+    typename ReadHandler&gt;
+class read_until_delim_op
+{
+public:
+    template &lt;typename DeducedBuffers&gt;
+    read_until_delim_op(
+        AsyncReadStream&amp; stream,
+        DeducedBuffers&amp;&amp; buffers,
+        char delim, ReadHandler&amp; handler)
+    : ...
+      buffers_(std::forward&lt;DeducedBuffers&gt;(buffers))
+      ...
+    {
+    }
+    ...
+    DynamicBuffer buffers_;
+    ...
+};
+
+template &lt;
+    typename AsyncReadStream,
+    typename DynamicBuffer,
+    typename ReadHandler&gt;
+NET_TS_INITFN_RESULT_TYPE(ReadHandler,
+    void (std::error_code, std::size_t))
+async_read_until(
+    AsyncReadStream&amp; s,
+    DynamicBuffer&amp;&amp; buffers,
+    char delim,
+    ReadHandler&amp;&amp; handler)
+{
+  // If you get an error on the following line it means that your handler does
+  // not meet the documented type requirements for a ReadHandler.
+  NET_TS_READ_HANDLER_CHECK(ReadHandler, handler) type_check;
+
+  async_completion&lt;ReadHandler,
+    void (std::error_code, std::size_t)&gt; init(handler);
+
+  detail::read_until_delim_op&lt;
+    AsyncReadStream,
+    typename decay&lt;DynamicBuffer&gt;::type,
+    NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
+        s,
+        DynamicBuffer&amp;&amp;buffers,
+        delim,
+        init.completion_handler)(std::error_code(), 0, 1);
+
+  return init.result.get();
+}
+</tt></pre></blockquote>
+<p>
+Given the semantics of dynamic buffers implied by the wording, instances of
+dynamic buffers behave more like references to storage types rather than
+storage types, as copies refer to the same underlying storage. This can be
+seen in the declaration of <tt>dynamic_string_buffer</tt> which meets
+the requirements of <b>DynamicBuffer</b>:
+</p>
+<blockquote><pre><tt>
+template &lt;typename Elem, typename Traits, typename Allocator&gt;
+class dynamic_string_buffer
+{
+  ...
+private:
+  std::basic_string&lt;Elem, Traits, Allocator&gt;&amp; string_;
+  std::size_t size_;
+  const std::size_t max_size_;
+};
+</tt></pre></blockquote>
+<p>
+A dynamic string buffer contains a reference to the underlying string. Copies
+of a dynamic string buffer refer to the same string. Note that the dynamic
+string buffer also contains some state: the <tt>size_</tt> and <tt>max_size_</tt>
+data members. This additional metadata informs the dynamic string buffer of
+the boundaries between the input and output sequences, as well as the maximum
+allowed size of the total of the input and output sequences.
+</p>
+<p>
+When only one composed operation handles the dynamic buffer, things seem to
+work. However, if a composed operation wishes to invoke another composed
+operation and pass that dynamic buffer, a problem arises. Consider two composed
+operations <tt>f</tt> and <tt>g</tt>, which both operate on an instance of
+dynamic buffer. When <tt>f</tt> is invoked, it makes a copy of the dynamic
+buffer and then calls <tt>g</tt> with the copy. At this point, <tt>g</tt> must
+also make a copy. Copies share the underlying storage, but in the case of
+dynamic string buffers each copy maintains its own distinct metadata. When
+<tt>g</tt> has finished mutating the dynamic buffer and returns control back
+to <tt>f</tt> by invoking the completion handler, the metadata in the copy of
+the dynamic buffer held by <tt>f</tt> will not have the changes made by <tt>g</tt>.
+</p>
+<p>
+Another design problem caused by adding metadata to the dynamic buffer concept
+is illustrated in the following example code:
+</p>
+<p><pre><blockquote>
+template&lt;class MutableBufferSequence&gt;
+std::size_t read(MutableBufferSequence const&amp;)
+{
+    throw std::exception{};
+}
+
+int main()
+{
+    std::string s;
+    assert(s.empty());
+    try
+    {
+        auto b = boost::asio::dynamic_buffer(s);
+        b.commit(read(b.prepare(32)));
+    }
+    catch(std::exception const&)
+    {
+        assert(s.empty()); // fails
+    }
+}
+</blockquote></pre></p>
+<p>
+While not technically incorrect, it may be surprising to the user that
+the string contains additional value-initialized data which was not part
+of the original input sequence (which in this case was empty). The wording of
+the dynamic buffer concept does not address this case.
+</p>
+<p>
+The solution we propose is to change the semantics of <b>DynamicBuffer</b>
+to represent a true storage type rather than a hybrid reference with metadata.
+Instances of dynamic buffers will be passed by reference, and callers will
+be required to manage the lifetime of dynamic buffer objects for the duration
+of any asynchronous operations. An additional benefit of this change is that
+it also solves the problem of exceptions described above.
+</p>
+<p><b>Proposed resolution:</b></p>
+<p>
+This wording is relative to <a href="http://open-std.org/JTC1/SC22/WG21/docs/papers/2018/n4734.pdf">N4734</a>.
+</p>
+<p><i>[Editor's note]</i></p>
+<p>Replace all occurrences of <tt>DynamicBuffer&amp;&amp;</tt> with <tt>DynamicBuffer&amp;</tt></p>
+<ol>
+
+<li><p>Modify 16.1 [buffer.synop], as indicated:</p><pre><blockqoute>
+...
+
+template&lt;class T, class Allocator&gt;
+class dynamic_vector_buffer;<
+
+template&lt;class CharT, class Traits, class Allocator&gt;
+class <ins>basic_</ins>dynamic_string_buffer;
+
+<del>// 16.14, dynamic buffer creation:</del>
+
+<del>template&lt;class T, class Allocator&gt;
+  dynamic_vector_buffer&lt;T, Allocator&gt;
+  dynamic_buffer(vector&lt;T, Allocator&gt;&amp; vec) noexcept;
+template&lt;class T, class Allocator&gt;
+  dynamic_vector_buffer&lt;T, Allocator&gt;
+  dynamic_buffer(vector&lt;T, Allocator&gt;&amp; vec, size_t n) noexcept;
+</del>
+
+<del>template&lt;class CharT, class Traits, class Allocator&gt;
+  dynamic_string_buffer&lt;CharT, Traits, Allocator&gt;
+  dynamic_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str) noexcept;
+template&lt;class CharT, class Traits, class Allocator&gt;
+  dynamic_string_buffer&lt;CharT, Traits, Allocator&gt;
+  dynamic_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str, size_t n) noexcept;</del>
+
+...
+
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b, error_code&amp; ec);
+template&lt;class SyncReadStream, class DynamicBuffer, class CompletionCondition&gt;
+  size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+              CompletionCondition completion_condition);
+template&lt;class SyncReadStream, class DynamicBuffer, class CompletionCondition&gt;
+  size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+              CompletionCondition completion_condition, error_code&amp; ec);
+
+...
+
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_read(AsyncReadStream&amp; stream,
+                     DynamicBuffer&amp;<del>&amp;</del> b, CompletionToken&amp;&amp; token);
+template&lt;class AsyncReadStream, class DynamicBuffer,
+  class CompletionCondition, class CompletionToken&gt;
+    DEDUCED async_read(AsyncReadStream&amp; stream,
+                       DynamicBuffer&amp;<del>&amp;</del> b,
+                       CompletionCondition completion_condition,
+                       CompletionToken&amp;&amp; token);
+
+...
+
+template&lt;class SyncWriteStream, class DynamicBuffer&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del>; b);
+template&lt;class SyncWriteStream, class DynamicBuffer&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b, error_code&amp; ec);
+template&lt;class SyncWriteStream, class DynamicBuffer, class CompletionCondition&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+               CompletionCondition completion_condition);
+template&lt;class SyncWriteStream, class DynamicBuffer, class CompletionCondition&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+               CompletionCondition completion_condition, error_code&amp; ec);
+
+...
+
+template&lt;class AsyncWriteStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_write(AsyncWriteStream&amp; stream,
+                      DynamicBuffer&amp;<del>&amp;</del> b, CompletionToken&amp;&amp; token);
+template&lt;class AsyncWriteStream, class DynamicBuffer,
+  class CompletionCondition, class CompletionToken&gt;
+    DEDUCED async_write(AsyncWriteStream&amp; stream,
+                        DynamicBuffer&amp;<del>&amp;</del> b,
+                        CompletionCondition completion_condition,
+                        CompletionToken&amp;&amp; token);
+
+...
+
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b, char delim);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b,
+                    char delim, error_code&amp; ec);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b, string_view delim);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b,
+                    string_view delim, error_code&amp; ec);
+
+...
+
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_read_until(AsyncReadStream&amp; s,
+                           DynamicBuffer&amp;<del>&amp;</del> b, char delim,
+                           CompletionToken&amp;&amp; token);
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_read_until(AsyncReadStream&amp; s,
+                           DynamicBuffer&amp;<del>&amp;</del> b, string_view delim,
+                           CompletionToken&amp;&amp; token);
+
+...
+</blockqoute></pre></li>
+
+<li>
+<p>Modify 16.2.4.2 [buffer.reqmts.dynamicbuffer], as indicated:</p><blockquote>
+A type <tt>X</tt> meets the <tt>DynamicBuffer</tt> requirements if it satisfies
+the requirements of <tt>Destructible</tt> (C++ 2014 [destructible])
+<del>and <tt>MoveConstructible</tt> (C++ 2014 [moveconstructible]),</del>
+as well as the additional requirements listed in Table 14.
+</blockquote></li>
+
+<li><p>Modify 16.12 [buffer.dynamic.vector], as indicated:</p><blockqoute>
+<pre>template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
+class dynamic_vector_buffer
+{
+public:
+  <em>// types:</em>
+  <ins>using value_type = vector&lt;T, Allocator&gt;;</ins>
+  using const_buffers_type = const_buffer;
+  using mutable_buffers_type = mutable_buffer;
+  
+  <em>// constructors:</em>
+  <ins>dynamic_vector_buffer() = default;</ins>
+  <ins>explicit dynamic_vector_buffer(size_t maximum_size);</ins>
+  <del>explicit dynamic_vector_buffer(vector&lt;T, Allocator&gt;&amp; vec) noexcept;</del>
+  <ins>explicit dynamic_vector_buffer(vector&lt;T, Allocator&gt; vec);</ins>
+  <del>dynamic_vector_buffer(vector&lt;T, Allocator&gt;&amp; vec, size_t maximum_size) noexcept;</del>
+  <ins>dynamic_vector_buffer(vector&lt;T, Allocator&gt; vec, size_t maximum_size);</ins>
+  dynamic_vector_buffer(dynamic_vector_buffer&amp;&amp;) = default;
+  
+  <em>// members:</em>
+  size_t size() const noexcept;
+  size_t max_size() const noexcept;
+  <ins>void max_size(size_t maximum_size);</ins>
+  size_t capacity() const noexcept;
+  const_buffers_type data() const noexcept;
+  mutable_buffers_type prepare(size_t n);
+  void commit(size_t n);
+  void consume(size_t n);
+  <ins>span&lt;T const&gt; get() const noexcept</ins>
+  <ins>value_type release();</ins>
+
+private:
+  vector&lt;T, Allocator&gt;<del>&amp;</del> vec_; <em>// exposition only</em>
+  size_t size_; <em>// exposition only</em>
+  <del>const </del>size_t max_size_; <em>// exposition only</em>
+};</pre>
+<p><blockquote><ins><tt>explicit dynamic_vector_buffer(size_t maximum_size)</tt></ins></blockquote></p>
+<p><ins><em>Effects:</em> Default-constructs <tt>vec_</tt>.
+  Initializes <tt>size_</tt> with <tt>0</tt>, and <tt>max_size_</tt> with <tt>maximum_size</tt></ins></p>
+<p>...</p>
+<p><blockquote><tt>explicit dynamic_vector_buffer(vector&lt;T, Allocator&gt;<del>&amp;</del> vec) noexcept</tt></blockquote></p>
+<p>4. <em>Effects:</em> Initializes <tt>vec_</tt> with <tt><ins>move(</ins>vec<ins>)</ins></tt>,
+  <tt>size_</tt> with <tt>vec<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>vec<ins>_</ins>.max_size()</tt></p>
+<p><blockquote><pre>
+dynamic_vector_buffer(vector&lt;T, Allocator&gt;<del>&amp;</del> vec,
+                      size_t maximum_size) noexcept;
+</pre></blockquote></p>
+<p>5. <em>Requires:</em> <tt>vec.size() <= maximum_size</tt></p>
+<p>6. <em>Effects:</em> Initializes <tt>vec_</tt> with <tt><ins>move(</ins>vec<ins>)</ins></tt>,
+  <tt>size_</tt> with <tt>vec<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>maximum_size</tt>.</em>
+<p>...</p>
+<p><blockquote><ins><tt>void max_size(size_t maximum_size)</tt></ins></blockquote></p>
+<p><ins>16. <em>Effects:</em> Performs <tt>max_size_ = maximum_size</tt>.</ins></p>
+<p><blockquote><ins><tt>span&lt;T const&gt; get() const noexcept</tt></ins></blockquote></p>
+<p><ins>17. <em>Returns:</em> <tt>span&lt;T const&gt;(vec_.data(), size_)</tt>.</ins></p>
+<p><blockquote><ins><tt>value_type release()</tt></ins></blockquote></p>
+<p><ins>18. <em>Returns:</em> <tt>move(vec_)</tt>.</ins></p>
+</blockqoute></li>
+
+<li><p>Modify 16.13 [buffer.dynamic.string], as indicated:</p><pre><blockqoute>
+template&lt;class CharT, class Traits, class Allocator&gt;
+class <ins>basic_</ins>dynamic_string_buffer
+{
+public:
+  <em>// types:</em>
+  <ins>using value_type = basic_string&lt;CharT, Traits, Allocator&gt;;</ins>
+  using const_buffers_type = const_buffer;
+  using mutable_buffers_type = mutable_buffer;
+
+  <em>// constructors:</em>
+  <ins>basic_dynamic_string_buffer() = default;</ins>
+  <del>explicit dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str) noexcept;</del>
+  <ins>explicit dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt; str);</ins>
+  <del>dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str, size_t maximum_size) noexcept;</del>
+  <ins>dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt; str, size_t maximum_size);</ins>
+  <ins>basic_</ins>dynamic_string_buffer(<ins>basic_</ins>dynamic_string_buffer&amp;&amp;) = default;
+
+  <em>// members:</em>
+  size_t size() const noexcept;
+  size_t max_size() const noexcept;
+  <ins>void max_size(size_t maximum_size)</ins>
+  size_t capacity() const noexcept;
+  const_buffers_type data() const noexcept;
+  mutable_buffers_type prepare(size_t n);
+  void commit(size_t n) noexcept;
+  void consume(size_t n);
+  <ins>basic_string_view&lt;CharT, Traits&gt; get() const noexcept</ins>
+  <ins>value_type release();</ins>
+
+private:
+  basic_string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str_; <em>// exposition only</em>
+  size_t size_; <em>// exposition only</em>
+  <del>const </del>size_t max_size_; <em>// exposition only</em>
+};
+
+<ins>using dynamic_string_buffer =
+  basic_string_buffer&lt;char, char_traits&lt;char&gt;, allocator&lt;char&gt;&gt;</ins>
+</blockqoute></pre>
+<p><blockquote><ins><tt>explicit basic_dynamic_string_buffer(size_t maximum_size)</tt></ins></blockquote></p>
+<p><ins><em>Effects:</em> Default-constructs <tt>str_</tt>.
+  Initializes <tt>size_</tt> with <tt>0</tt>, and <tt>max_size_</tt> with <tt>maximum_size</tt></ins></p>
+<p>...</p>
+<p><blockquote><tt>explicit basic_dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str) noexcept</tt></blockquote></p>
+<p>4. <em>Effects:</em> Initializes <tt>str_</tt> with <tt><ins>move(</ins>str<ins>)</ins></tt>,
+  <tt>size_</tt> with <tt>str<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>str<ins>_</ins>.max_size()</tt></p>
+<p><blockquote><pre>
+basic_dynamic_string_buffer(string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str,
+                            size_t maximum_size) noexcept;
+</pre></blockquote></p>
+<p>5. <em>Requires:</em> <tt>str.size() <= maximum_size</tt></p>
+<p>6. <em>Effects:</em> Initializes <tt>str_</tt> with <tt><ins>move(</ins>str<ins>)</ins></tt>,
+  <tt>size_</tt> with <tt>str<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>maximum_size</tt>.</em>
+<p>...</p>
+<p><blockquote><ins><tt>void max_size(size_t maximum_size)</tt></ins></blockquote></p>
+<p><ins>16. <em>Effects:</em> Performs <tt>max_size_ = maximum_size</tt>.</ins></p>
+<p><blockquote><ins><tt>basic_string_view&lt;CharT, Traits&gt; get() const noexcept</tt></ins></blockquote></p>
+<p><ins>17. <em>Returns:</em> <tt>basic_string_view&lt;CharT, Traits&gt;(str_)</tt>.</ins></p>
+<p><blockquote><ins><tt>value_type release()</tt></ins></blockquote></p>
+<p><ins>18. <em>Returns:</em> <tt>move(str_)</tt>.</ins></p>
+</li>
+
+<li><p>Remove 16.4 [buffer.dynamic.creation] entirely</p></li>
+
+<li><p>Modify 17.5 [buffer.read], as indicated:</p><blockqoute><pre>
+...
+
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b, error_code&amp; ec);
+template&lt;class SyncReadStream, class DynamicBuffer,
+  class CompletionCondition&gt;
+    size_t read(SyncReadStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+                CompletionCondition completion_condition);
+template&lt;class SyncReadStream, class DynamicBuffer,
+  class CompletionCondition&gt;
+    size_t read(SyncReadStream& stream, DynamicBuffer&amp;<del>&amp;</del> b,
+                CompletionCondition completion_condition,
+                error_code&amp; ec);
+
+...
+</pre></blockqoute></li>
+
+<li><p>Modify 17.6 [buffer.async.read], as indicated:</p><blockqoute><pre>
+...
+
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_read(AsyncReadStream&amp; stream,
+                     DynamicBuffer&amp;<del>&amp;</del> b, CompletionToken&amp;&amp; token);
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionCondition,
+  class CompletionToken&gt;
+    DEDUCED async_read(AsyncReadStream&amp; stream,
+                       DynamicBuffer&amp;<del>&amp;</del> b,
+                       CompletionCondition completion_condition,
+                       CompletionToken&amp;&amp; token);
+
+...
+</pre>
+14. The program shall ensure <ins>both</ins> the <tt>AsyncReadStream</tt>
+object <tt>stream</tt> <ins>and the <tt>DynamicBuffer</tt> object <tt>b</tt>
+are</ins><del> is</del> valid until the completion handler for the asynchronous
+operation is invoked.
+</blockqoute></li>
+
+<li><p>Modify 17.7 [buffer.write], as indicated:</p><blockqoute><pre>
+...
+
+template&lt;class SyncWriteStream, class DynamicBuffer&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b);
+template&lt;class SyncWriteStream, class DynamicBuffer&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b, error_code&amp; ec);
+template&lt;class SyncWriteStream, class DynamicBuffer, class CompletionCondition&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+               CompletionCondition completion_condition);
+template&lt;class SyncWriteStream, class DynamicBuffer, class CompletionCondition&gt;
+  size_t write(SyncWriteStream&amp; stream, DynamicBuffer&amp;<del>&amp;</del> b,
+               CompletionCondition completion_condition,
+               error_code&amp; ec);
+
+...
+</pre></blockqoute></li>
+
+<li><p>Modify 17.8 [buffer.async.write], as indicated:</p><blockqoute><pre>
+...
+
+template&lt;class AsyncWriteStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_write(AsyncWriteStream&amp; stream,
+                      DynamicBuffer&amp;<del>&amp;</del> b, CompletionToken&amp;&amp; token);
+template&lt;class AsyncWriteStream, class DynamicBuffer, class CompletionCondition,
+  class CompletionToken&gt;
+    DEDUCED async_write(AsyncWriteStream&amp; stream,
+                        DynamicBuffer&amp;<del>&amp;</del> b,
+                        CompletionCondition completion_condition,
+                        CompletionToken&amp;&amp; token);
+
+...
+</pre>
+14. The program shall ensure both the <tt>AsyncWriteStream</tt> object
+<tt>stream</tt> and the <ins><tt>DynamicBuffer</tt> object <tt>b</tt>
+<del>memory associated with the dynamic buffer <tt>b</tt></del>
+are valid until the completion handler for the asynchronous operation
+is invoked.
+</blockqoute></li>
+
+<li><p>Modify 17.9 [buffer.read.until], as indicated:</p><blockqoute><pre>
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b, char delim);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b,
+                    char delim, error_code&amp; ec);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b, string_view delim);
+template&lt;class SyncReadStream, class DynamicBuffer&gt;
+  size_t read_until(SyncReadStream&amp; s, DynamicBuffer&amp;<del>&amp;</del> b,
+                    string_view delim, error_code&amp; ec);
+
+...
+</pre></blockqoute></li>
+
+<li><p>Modify 17.10 [buffer.async.read.until], as indicated:</p><blockqoute><pre>
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_read_until(AsyncReadStream&amp; s,
+                           DynamicBuffer&amp;<del>&amp;</del> b, char delim,
+                           CompletionToken&amp;&amp; token);
+template&lt;class AsyncReadStream, class DynamicBuffer, class CompletionToken&gt;
+  DEDUCED async_read_until(AsyncReadStream&amp; s,
+                           DynamicBuffer&amp;<del>&amp;</del> b, string_view delim,
+                           CompletionToken&amp;&amp; token);
+
+...
+</pre>
+6. The program shall ensure <ins>both</ins> the <tt>AsyncReadStream</tt> object
+<tt>stream</tt> <ins>and the <tt>DynamicBuffer</tt> object <tt>b</tt>
+are</ins><del> is</del> valid until the completion handler for the
+asynchronous operation is invoked.
+</blockqoute></li>
+
+</ol>
+
+</body>
+</html>
