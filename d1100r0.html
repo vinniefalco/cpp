@@ -1,139 +1,126 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
-<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<!DOCTYPE html>
 
-<title>[networking.ts] Permit efficient composition when using DynamicBuffer</title>
-<style type="text/css">
-  p {text-align:justify}
-  li {text-align:justify}
-  blockquote.note
-  {
-    background-color:#E0E0E0;
-    padding-left: 15px;
-    padding-right: 15px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-  ins {background-color:#A0FFA0}
-  del {background-color:#FFA0A0}
-  table {border-collapse: collapse;}
-</style>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Efficient composition with DynamicBuffer</title>
+    <style type="text/css">
+    p {text-align:justify}
+    li {text-align:justify}
+    blockquote.note
+    {
+        background-color:#E0E0E0;
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+    }
+    p.note
+    {
+        background-color:#E0E0E0;
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+    }
+    ins { background-color: #CCFFCC; }
+    del { background-color: #FFCCCC; }
+    .insert { background-color: #CCFFCC; }
+    address {text-align:right;}
+    h1 {text-align:center;}
+    span.comment {color:#C80000;}
+    code {white-space:pre;}
+    </style>
 </head>
 <body>
 
+<address>
+Document number: D1100R0<br>
+<br>
+<a href="mailto:vinnie.falco@gmail.com">Vinnie Falco</a><br>
+2018-06-04<br>
+</address>
 <hr>
-<h3><a name="3114" href="#3114">3114</a><sup><a href="https://cplusplus.github.io/LWG/issue3114">(i)</a></sup>. [networking.ts] Permit efficient composition when using <tt>DynamicBuffer</tt></h3>
-<p><b>Section:</b> 16 [networking.ts::buffer], 17 [networking.ts::buffer.stream] <b>Status:</b> <a href="lwg-active.html#New">New</a>
- <b>Submitter:</b> Vinnie Falco <b>Opened:</b> 2018-05-18 <b>Last modified:</b> 2018-05-20</p>
-<p><b>Priority: </b>Not Prioritized
-</p>
-<p><b>View all issues with</b> <a href="lwg-status.html#New">New</a> status.</p>
-<p><b>Discussion:</b></p>
-<b>Addresses: networking.ts</b>
+<h1>Efficient composition with DynamicBuffer</h1>
+
+<h2>Contents</h2>
+
+<ul>
+<li><a href="#Introduction">Introduction</a></li>
+<li><a href="#Description">Description</a>
+    <ul>
+    <li><a href="#Async">Asynchronous Operations</a>
+    <li><a href="#Composition">Problem with Composition</a>
+    <li><a href="#Exception">Problem with Exceptions</a>
+    <li><a href="#Workarounds">Problem with Workarounds</a>
+    </ul>
+</li>
+<li><a href="#Solution">Solution</a></li>
+<li><a href="#References">References</a></li>
+</ul>
+
+<a name="Introduction"></a><h2>Introduction</h2>
 <p>
-Asynchronous algorithms are started by a call to an <em>initiating function</em>.
-When these algorithms are constructed from calls to other initiating functions,
-the result is called a <em>composed operation</em>. For example, <tt>async_read</tt> may be 
-implemented in terms of zero or more calls to a stream's <tt>async_read_some</tt> algorithm. 
-For operations where the caller cannot easily determine ahead of time the storage requirements 
-needed for an algorithm to meet its post-conditions, [networking.ts] introduces the
-<b>DynamicBuffer</b> concept:
+This paper describes a design flaw in the specification of the
+<b>DynamicBuffer</b> concept found in [networking.ts], which prevents efficient
+composition of asynchronous operations accepting an instance of a dynamic
+buffer. The proposed remedy reverts back some of the differences in the TS from
+its precursor library Asio (and Boost.Asio) by making <b>DynamicBuffer</b> a
+true storage type.
+</p>
+
+<a name="Description"></a><h2>Description</h2>
+
+<p>
+Most network algorithms accept fixed-size buffers as input, output, or both,
+in their signatures and contracts. For operations where the caller cannot easily
+determine ahead of time the storage requirements needed for an algorithm to
+meet its post-conditions, [networking.ts] introduces the <b>DynamicBuffer</b> concept:
 </p>
 <blockquote>
-<p>
 A dynamic buffer encapsulates memory storage that may be automatically
 resized as required, where the memory is divided into two regions: readable
 bytes followed by writable bytes. [buffer.reqmts.dynamicbuffer]
-</p>
 </blockquote>
 <p>
-Signatures for algorithms in the technical specification which accept dynamic
-buffers use forwarding references:
+Readable and writable bytes returned by a dynamic buffer are represented
+respectively by the <b>ConstBufferSequence</b> and <b>MutableBufferSequence</b>
+concepts defined in the TS. These sequences are a special type of range whose
+element type is a span of bytes. Network algorithms append data to the dynamic
+buffer in two steps. First, a buffer sequence representing writable bytes is
+obtained by calling <tt>prepare</tt>. Then, after the algorithm has placed zero
+or more bytes at the beginning of the sequence the function <tt>commit</tt> is
+called to move some or all of that data to the sequence representing the readable
+bytes. The term "move" here is notional: the dynamic buffer concept does not
+require (nor disallow) a memory move. The following code reads from a
+socket into a dynamic buffer:
 </p>
 <blockquote><pre>
-<i>// 17.10 [networking.ts::buffer.async.read.until], asynchronous delimited read operations:</i>
-
-template&lt;
-  class AsyncReadStream,
-  class DynamicBuffer,
-  class CompletionToken&gt;
-<i>DEDUCED</i> async_read_until(
-  AsyncReadStream&amp; s,
-  DynamicBuffer&amp;&amp; b,
-  char delim,
-  CompletionToken&amp;&amp; token);
+string s;
+dynamic_string_buffer b{s}; // dynamic_string_buffer is defined by the TS
+auto const bytes_transferred = socket.read_some(b.prepare(1024)); // read up to 1024 bytes
+b.commit(bytes_transferred);
+assert(s.size() == bytes_transferred);
 </pre></blockquote>
 <p>
-Because the initiating function returns immediately, and the associated composed operation executes later, 
-it is necessary for the algorithm to manage the lifetime of the dynamic buffer. Guidance for doing so is 
-given in the TS:
-</p>
-<blockquote>
-<b>13.2.7.5 Lifetime of initiating function arguments [async.reqmts.async.lifetime]</b>
-<p>
-1. Unless otherwise specified, the lifetime of arguments to initiating functions shall be treated as 
-follows: [&hellip;] the implementation does not assume the validity of the argument after the initiating 
-function completes [&hellip;] The implementation may make copies of the argument, and all copies shall be
-destroyed no later than immediately after invocation of the completion handler.
-</p>
-</blockquote>
-<p>
-Given the guidance above, the most sensible approach is for the implementation
-to move or make a decay-copy of the argument. An implementation of the TS,
-authored by the principal architect of the TS itself, does precisely that:
+As can be seen in the preceding code, an instance of <tt>dynamic_string_buffer</tt>
+does not own its storage. Overwhelming feedback from users indicates they wish
+to use traditional types like <tt>string</tt> or <tt>vector</tt> to store their
+data. The TS improves on its predecessor Asio by providing the types
+<tt>dynamic_string_buffer</tt> and <tt>dynamic_vector_buffer</tt> to achieve
+this goal (subsequent discussions will refer only to <tt>dynamic_string_buffer</tt>,
+but also apply to <tt>dynamic_vector_buffer</tt>). The TS provides a family of
+algorithms which allow the code above to be expressed more succinctly by
+passing the dynamic buffer instead of the buffer sequence representing the
+writable bytes. To facilitiate construction and lifetime management of these
+dynamic buffers, the TS function <tt>dynamic_buffer</tt> is overloaded for
+various container types to return a dynamic buffer instance, as seen in this
+synchronous example:
 </p>
 <blockquote><pre>
-template &lt;
-    typename AsyncReadStream,
-    typename DynamicBuffer,
-    typename ReadHandler&gt;
-class read_until_delim_op
-{
-public:
-    template &lt;typename DeducedBuffers&gt;
-    read_until_delim_op(
-        AsyncReadStream&amp; stream,
-        DeducedBuffers&amp;&amp; buffers,
-        char delim, ReadHandler&amp; handler)
-    : [&hellip;]
-      buffers_(std::forward&lt;DeducedBuffers&gt;(buffers))
-      [&hellip;]
-    {
-    }
-    [&hellip;]
-    DynamicBuffer buffers_;
-    [&hellip;]
-};
-
-template &lt;
-    typename AsyncReadStream,
-    typename DynamicBuffer,
-    typename ReadHandler&gt;
-NET_TS_INITFN_RESULT_TYPE(ReadHandler,
-    void (std::error_code, std::size_t))
-async_read_until(
-    AsyncReadStream&amp; s,
-    DynamicBuffer&amp;&amp; buffers,
-    char delim,
-    ReadHandler&amp;&amp; handler)
-{
-  // If you get an error on the following line it means that your handler does
-  // not meet the documented type requirements for a ReadHandler.
-  NET_TS_READ_HANDLER_CHECK(ReadHandler, handler) type_check;
-
-  async_completion&lt;ReadHandler,
-    void (std::error_code, std::size_t)&gt; init(handler);
-
-  detail::read_until_delim_op&lt;
-    AsyncReadStream,
-    typename decay&lt;DynamicBuffer&gt;::type,
-    NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
-        s,
-        DynamicBuffer&amp;&amp;buffers,
-        delim,
-        init.completion_handler)(std::error_code(), 0, 1);
-
-  return init.result.get();
-}
+string s;
+auto const bytes_transferred = read(socket, dynamic_buffer(s));
+assert(s.size() == bytes_transferred);
 </pre></blockquote>
 <p>
 Given the semantics of dynamic buffers implied by the wording, instances of
@@ -161,18 +148,237 @@ data members. This additional metadata informs the dynamic string buffer of
 the boundaries between the readable and writable bytes, as well as the maximum
 allowed size of the total of the readable and writable bytes.
 <p/>
+
+<a name="Async"></a><h3>Asynchronous Operations</h3>
+<p>
+Thus far we have shown synchronous (blocking) examples. Asynchronous algorithms
+are started by a call to an <em>initiating function</em> which returns immediately.
+When the operation has completed, the implementation invokes a caller-provided
+function object called a <em>completion handler</em> with the result of the
+operation, usually indicated by an error code and possible additional
+data such as the number of bytes transacted. Here is a typical signature of an
+asynchronous TS algorithm which accepts a dynamic buffer instance:
+</p>
+<blockquote><pre>
+<i>// 17.10 [networking.ts::buffer.async.read.until], asynchronous delimited read operations:</i>
+
+template&lt;
+  class AsyncReadStream,
+  class DynamicBuffer,
+  class CompletionToken&gt;
+<i>DEDUCED</i> async_read_until(
+  AsyncReadStream&amp; s,
+  DynamicBuffer&amp;&amp; b,
+  char delim,
+  CompletionToken&amp;&amp; token);
+</pre></blockquote>
+<p>
+Since the initiating function returns immediately, it is necessary for the
+asynchronous operation to manage the lifetime of the dynamic buffer parameter.
+Guidance for doing so is given in the TS:
+</p>
+<blockquote>
+<b>13.2.7.5 Lifetime of initiating function arguments [async.reqmts.async.lifetime]</b>
+<p>
+1. Unless otherwise specified, the lifetime of arguments to initiating functions shall be treated as 
+follows: [&hellip;] the implementation does not assume the validity of the argument after the initiating 
+function completes [&hellip;] The implementation may make copies of the argument, and all copies shall be
+destroyed no later than immediately after invocation of the completion handler.
+</p>
+</blockquote>
+<p>
+Given that the requirement for dynamic buffers is that they are <b>MoveConstructible</b>,
+a sensible implementation will make a decay-copy of the argument. An implementation
+authored by the principal architect of the TS, does precisely that:
+</p>
+<blockquote><pre>
+namespace detail {
+
+template &lt;
+    typename AsyncReadStream,
+    typename DynamicBuffer,
+    typename ReadHandler&gt;
+class read_until_delim_op
+{
+public:
+    // Note: DeducedDynamicBuffer will be DynamicBuffer plus cv-ref qualifiers
+    template &lt;typename DeducedDynamicBuffer&gt;
+    read_until_delim_op(
+        AsyncReadStream&amp; stream,
+        DeducedDynamicBuffer&amp;&amp; buffers,
+        char delim, ReadHandler&amp; handler)
+    : [&hellip;]
+      buffers_(std::forward&lt;DeducedDynamicBuffer&gt;(buffers))
+      [&hellip;]
+    {
+    }
+    [&hellip;]
+    void operator()(const std::error_code& ec,
+                    std::size_t bytes_transferred, int start = 0);
+    [&hellip;]
+    DynamicBuffer buffers_;
+    [&hellip;]
+};
+
+} // detail
+
+template &lt;
+    typename AsyncReadStream,
+    typename DynamicBuffer,
+    typename ReadHandler&gt;
+NET_TS_INITFN_RESULT_TYPE(ReadHandler,
+    void (std::error_code, std::size_t))
+async_read_until(
+    AsyncReadStream&amp; s,
+    DynamicBuffer&amp;&amp; buffers,
+    char delim,
+    ReadHandler&amp;&amp; handler)
+{
+  // If you get an error on the following line it means that your handler does
+  // not meet the documented type requirements for a ReadHandler.
+  NET_TS_READ_HANDLER_CHECK(ReadHandler, handler) type_check;
+
+  async_completion&lt;ReadHandler,
+    void (std::error_code, std::size_t)&gt; init(handler);
+
+  detail::read_until_delim_op&lt;
+    AsyncReadStream,
+    typename std::decay&lt;DynamicBuffer&gt;::type,
+    NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
+        s,
+        std::forward&lt;DynamicBuffer&gt;(buffers),
+        delim,
+        init.completion_handler)(std::error_code(), 0, 1);
+
+  return init.result.get();
+}
+</pre></blockquote>
+<p>
+Further evidence that a dynamic buffer represents a lightweight non-owning
+reference to storage is provided by this quote from LWG issue by the same
+author as the TS:
+</p>
+<blockquote>
+Asio's implementation (and the intended specification) performs <tt>DECAY_COPY(b)</tt>
+in the <tt>async_read</tt>, <tt>async_write</tt>, and <tt>async_read_until</tt>
+initiating functions. All operations performed on b are actually performed on
+that decay-copy, or on a move-constructed descendant of it. <b>The copy is intended 
+to refer to the same underlying storage and be otherwise interchangeable with
+the original in every way</b>. <em>[Ed: emphasis added]</em>
+</blockquote>
+
+<p>
+When asynchronous algorithms are constructed from calls to other initiating functions,
+the result is called a <em>composed operation</em>. For example, <tt>async_read</tt> may be 
+implemented in terms of zero or more calls to a stream's <tt>async_read_some</tt> algorithm. 
+Layers of composition may be added to arbitrary degree, permitting algorithms of
+significant complexity to be developed. A composed operation is typically implemented
+as a movable function object containing additional state. When the composed
+operation calls an intermediate initiating function, it passes <tt>std::move(*this)</tt>
+as the completion handler. This idiom, informally known as "stack-ripping" is used for
+reasons related to the optimization of memory allocation during asynchronous continuations
+(and beyond the scope of this paper). Here is the function call operator for the
+<tt>async_read_until</tt> operation described above:
+</p>
+<blockquote><pre>
+void read_until_op::operator()(const std::error_code& ec,
+                               std::size_t bytes_transferred, int start = 0)
+{
+    ...
+    
+    // Start a new asynchronous read operation to obtain more data.
+    stream_.async_read_some(buffers_.prepare(bytes_to_read), std::move(*this));
+
+    ...
+}
+</pre></blockquote>
+<p>
+Care must be taken when using this idiom, as the memory location of data
+members belonging to the function object will necessarily change every time
+an initiating function is invoked. The implication is that lvalue references
+belonging to any of the data members of the function object may not
+be passed to intermediate initiating functions. This prevents internal
+interfaces where dynamic buffers are passed by reference.
+</p>
+
+
+
+<a name="Composition"></a><h3>Problem with Composition</h3>
+<p>
 When only one composed operation handles the dynamic buffer, things seem to
 work. However, if a composed operation wishes to invoke another composed
-operation and pass that dynamic buffer, a problem arises. Consider two composed
-operations <tt>f</tt> and <tt>g</tt>, which both operate on an instance of
-dynamic buffer. When <tt>f</tt> is invoked, it makes a copy of the dynamic
-buffer and then calls <tt>g</tt> with the copy. At this point, <tt>g</tt> must
-also make a copy. Copies share the underlying storage, but in the case of
-dynamic string buffers each copy maintains its own distinct metadata. When
-<tt>g</tt> has finished mutating the dynamic buffer and returns control back
-to <tt>f</tt> by invoking the completion handler, the metadata in the copy of
-the dynamic buffer held by <tt>f</tt> will not have the changes made by <tt>g</tt>.
-<p/>
+operation on that dynamic buffer, a problem arises. Consider a composed
+operation <tt>async_http_read</tt> which accepts a dynamic buffer, and is
+implemented in terms of zero or more calls to <tt>async_http_read_some</tt>,
+which also accepts the same dynamic buffer. When <tt>async_http_read_some</tt>
+is invoked, it takes ownership of the buffer via move. However, if
+<tt>async_http_read</tt> needs to invoke <tt>async_http_read_some</tt>
+again to fufill its contract, it cannot do so without depending on undefined
+behavior. This is because on the second and subsequent invocations of
+<tt>async_http_read_some</tt>, the buffer is in a moved-from state, and
+the specification of <b>DynamicBuffer</b> is silent on the condition of
+moved-from objects. This can be seen in the implementation of the functions
+described above, which come from the Boost.Beast [2] library:
+</p>
+<blockquote><pre>
+template&lt;class Stream, class DynamicBuffer,
+    bool isRequest, class Derived, class Condition,
+        class Handler&gt;
+class read_http_op : public boost::asio::coroutine
+{
+    Stream& stream_;
+    DynamicBuffer buffer_;
+    basic_parser<isRequest, Derived>& parser_;
+    std::size_t bytes_transferred_ = 0;
+    Handler handler_;
+    bool cont_ = false;
+
+public:
+    [&hellip;]
+
+    void
+    operator()(
+        error_code ec,
+        std::size_t bytes_transferred = 0,
+        bool cont = true)
+    {
+        cont_ = cont;
+        BOOST_ASIO_CORO_REENTER(*this)
+        {
+            if(Condition{}(p_))
+            {
+                BOOST_ASIO_CORO_YIELD
+                boost::asio::post(stream_.get_executor(),
+                    bind_handler(std::move(*this), ec));
+                goto upcall;
+            }
+            for(;;)
+            {
+                // The call to async_http_read_some will produce
+                // undefined behavior on the second and subsequent
+                // calls, since buffer_ is in the moved-from state:
+                //
+                BOOST_ASIO_CORO_YIELD
+                async_http_read_some(
+                    stream_, std::move(buffer_), parser_, std::move(*this));
+
+                if(ec)
+                    goto upcall;
+                bytes_transferred_ += bytes_transferred;
+                if(Condition{}(p_))
+                    goto upcall;
+            }
+        upcall:
+            handler_(ec, bytes_transferred_);
+        }
+    }
+};
+</pre></blockquote>
+
+
+
+<a name="Exception"></a><h3>Problem with Exceptions</h3>
+<p>
 Another design problem caused by adding metadata to the dynamic buffer concept
 is illustrated in the following example code:
 </p>
@@ -202,18 +408,171 @@ int main()
 While not technically incorrect, it may be surprising to the user that
 the string contains additional value-initialized data which was not part
 of the original readable bytes (which in this case was empty). The wording of
-the dynamic buffer concept does not address this case.
-<p/>
+<b>DynamicBuffer</b> and <tt>dynamic_string_buffer</tt> do not address
+the effect of exceptions on state of the readable bytes in the underlying
+container at all.
+</p>
+
+<a name="Workarounds"></a><h3>Problem with Workarounds</h3>
+<p>
+The problem of composition can be solved using the current specification of
+<b>DynamicBuffer</b> by creating a copyable, reference-counted wrapper which
+holds a decay-copy of the dynamic buffer argument. Here is a partial sketch
+of that wrapper:
+</p>
+<blockquote><pre>
+template&lt;class DynamicBuffer&gt;
+class shared_buffer
+{
+    std::shared_ptr&lt;DynamicBuffer&gt; p_;
+
+public:
+    template&lt;class DeducedDynamicBuffer&gt;
+    explicit shared_buffer(DeducedDynamicBuffer&amp;&amp; b)
+        : p_(std::make_shared&lt;DynamicBuffer&gt;(std::forward&lt;DeducedDynamicBuffer&gt;(b)))
+    {
+    }
+
+    [&hellip;]
+
+    mutable_buffers_type prepare(std::size_t n);
+    void commit(std::size_t);
+};
+</pre></blockquote>
+<p>
+An existing initiating function may be adjusted to use the wrapper instead,
+as shown:
+</p>
+<blockquote><pre>
+template &lt;
+    typename AsyncReadStream,
+    typename DynamicBuffer,
+    typename ReadHandler&gt;
+NET_TS_INITFN_RESULT_TYPE(ReadHandler,
+    void (std::error_code, std::size_t))
+async_read_until(
+    AsyncReadStream&amp; s,
+    DynamicBuffer&amp;&amp; buffers,
+    char delim,
+    ReadHandler&amp;&amp; handler)
+{
+  // If you get an error on the following line it means that your handler does
+  // not meet the documented type requirements for a ReadHandler.
+  NET_TS_READ_HANDLER_CHECK(ReadHandler, handler) type_check;
+
+  async_completion&lt;ReadHandler,
+    void (std::error_code, std::size_t)&gt; init(handler);
+
+  read_until_delim_op&lt;
+    AsyncReadStream,
+    shared_buffer&lt;typename std::decay&lt;DynamicBuffer&gt;::type&gt;,
+    NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
+        s,
+        shared_buffer&lt;typename std::decay&lt;DynamicBuffer&gt;::type&gt{std::forward&lt;DynamicBuffer&gt;(buffers)},
+        delim,
+        init.completion_handler)(std::error_code(), 0, 1);
+
+  return init.result.get();
+}
+</pre></blockquote>
+<p>
+This workaround comes at the expense of one or more additional unnecessary
+dynamic allocations. Utilizing the workaround would sacrifice an important
+C++ value: zero-cost abstractions.
+</p>
+
+</p>
+<a name="Solution"></a><h2>Solution</h2>
+<p>
+The Net.TS predecessors Asio and Boost.Asio offered only the single
+concrete type <tt>basic_streambuf</tt> which addressed the problem of
+stream algorithms which need to write a dynamic number of octets. The
+interface to <tt>basic_streambuf</tt> almost perfectly matches the
+requirements of <b>DynamicBuffer</b>.
+Field experience showed that users had trouble manipulating buffer sequences,
+often writing code which performed unnecessary allocate/copy/free cycles
+to get the data in the format they desired. Users loudly declared the
+desire to send and receive their data using traditional containers such
+as <tt>string</tt> and <tt>vector</tt> with which they are already very
+familiar.
+</p>
+<p>
+To support the use of strings and vectors in stream algorithms, the
+<b>DynamicBuffer</b> concept is fashioned as a non-owning reference wrapper
+to a supported container type whose lifetime is managed by the caller. Algorithms
+which accept dynamic buffer parameters use a forwarding reference, and take
+ownership via decay-copy. Net.TS provides some functions which accept a
+reference to a user-managed container and return a suitable wrapper. These
+functions are designed for ease of use, as they may be invoked directly at
+call sites:
+</p>
+<blockquote><pre>
+<i>// 16.14 [networking.ts::buffer.dynamic.creation], dynamic buffer creation:</i>
+
+template&lt;class T, class Allocator&gt;
+  dynamic_vector_buffer&lt;T, Allocator&gt;
+  dynamic_buffer(vector&lt;T, Allocator&gt;&amp; vec) noexcept;
+template&lt;class T, class Allocator&gt;
+  dynamic_vector_buffer&lt;T, Allocator&gt;
+  dynamic_buffer(vector&lt;T, Allocator&gt;&amp; vec, size_t n) noexcept;
+
+template&lt;class CharT, class Traits, class Allocator&gt;
+  dynamic_string_buffer&lt;CharT, Traits, Allocator&gt;
+  dynamic_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str) noexcept;
+template&lt;class CharT, class Traits, class Allocator&gt;
+  dynamic_string_buffer&lt;CharT, Traits, Allocator&gt;
+  dynamic_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str, size_t n) noexcept;
+</pre></blockquote>
+<p>
 The solution we propose is to change the semantics of <b>DynamicBuffer</b>
 to represent a true storage type rather than a hybrid reference with metadata.
 Instances of dynamic buffers will be passed by reference, and callers will
 be required to manage the lifetime of dynamic buffer objects for the duration
-of any asynchronous operations. An additional benefit of this change is that
-it also solves the problem of exceptions described above.
+of any asynchronous operations. As the caller is already responsible for
+maintaining the lifetime of the stream, and the <tt>string</tt> or <tt>vector</tt>
+under the old scheme, maintaining the lifetime of the dynamic buffer in the
+new scheme poses no additional burden. To solve the problem of exceptions,
+our solution refactors the dynamic buffer wrappers to own their corresponding
+string and vector. The caller can only take ownership of the container by
+calling a member function. The implementation then has the opportunity to
+adjust the container to reflect the correct state before the caller receives
+the value.
+</p>
+<p>
+We believe that there is a tension between ease of use and utility. The current
+specification provides ease of use but lacks utility, specifically the ability
+to compose higher level operations out of lower level ones which operate on
+dynamic buffers. The solution we propose goes in the opposite direction,
+sacrificing some ease of use in exchange for the ability to compose. The
+author of this paper favor composition over ease of use for a few reasons.
+First, because C++ should always prioritize zero-cost abstractions as
+a primary factor to differentiate itself from other languages. And second,
+because the entirety of Net.TS provides <em>low-level abstractions</em>. Most
+users should not be concerning themselves with interacting at the raw TCP/IP
+level. Instead they should be working with high level interfaces such as
+HTTP client APIs, WebSocket framework APIs, REST SDKs, and the like. These
+high level interfaces do not exist yet, but with the standardization of low
+level networking provided in Net.TS we are confident they will arrive in
+due time.
+</p>
+<p>
+Note that writing asynchronous code in a clean style which uses all the
+modern idioms of Asio and Net.TS is quite a difficult endeavor, as evidenced
+by the distinct lack of open source libraries built on Asio which follow
+best practices (despite Asio having been available for over a decade).
+Furthermore the number of people who need to author components which interact
+directly with low-level interfaes such as Asio or Net.TS should be few in number.
+Therefore, we favor a Net.TS specification which addresses the needs for
+writers of specialized middleware and high-level interfaces over ordinary
+users.
+</p>
+<p>
+The author of this paper is not entirely satisfied with the proposed solution,
+and believes that finding the right solution which balances the needs of utility
+with ease of use is probably best left to the LEWG.
 </p>
 
-
-<p><b>Proposed resolution:</b></p>
+<a name="Wording"></a><h2>Proposed Wording</h2>
 <p>This wording is relative to <a href="http://wg21.link/n4734">N4734</a>.</p>
 
 <blockquote class="note">
@@ -231,10 +590,10 @@ as indicated:</p>
 <i>// 16.11 [networking.ts::buffer.creation], buffer creation:</i>
 [&hellip;]
 
-template&lt;class T, class Allocator&gt;
+template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
 class dynamic_vector_buffer;
 
-template&lt;class CharT, class Traits, class Allocator&gt;
+template&lt;class CharT, class Traits<ins> = std::char_traits&lt;CharT&gt;</ins>, class Allocator<ins> = allocator&lt;CharT&gt;</ins>&gt;
 class <ins>basic_</ins>dynamic_string_buffer;
 
 <del><i>// 16.14 [networking.ts::buffer.dynamic.creation], dynamic buffer creation:</i></del>
@@ -358,7 +717,7 @@ as well as the additional requirements listed in Table 14.
 <blockquote><pre>
 [&hellip;]
 
-template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
+template&lt;class T, class Allocator&gt;
 class dynamic_vector_buffer
 {
 public:
@@ -377,7 +736,7 @@ public:
   <em>// members:</em>
   size_t size() const noexcept;
   size_t max_size() const noexcept;
-  <ins>void max_size(size_t maximum_size);</ins>
+  <ins>void max_size(size_t maximum_size) noexcept;</ins>
   size_t capacity() const noexcept;
   const_buffers_type data() const noexcept;
   mutable_buffers_type prepare(size_t n);
@@ -498,7 +857,7 @@ public:
   <em>// members:</em>
   size_t size() const noexcept;
   size_t max_size() const noexcept;
-  <ins>void max_size(size_t maximum_size)</ins>
+  <ins>void max_size(size_t maximum_size) noexcept;</ins>
   size_t capacity() const noexcept;
   const_buffers_type data() const noexcept;
   mutable_buffers_type prepare(size_t n);
@@ -735,11 +1094,11 @@ asynchronous operation is invoked.
 </p>
 </blockquote>
 </li>
-
 </ol>
 
+<a name="References"></a><h2>References</h2>
 
-
-
+[1] <a href="http://cplusplus.github.io/LWG/lwg-active.html#3072">http://cplusplus.github.io/LWG/lwg-active.html#3072</a><br>
+[2] <a href="https://github.com/boostorg/beast">https://github.com/boostorg/beast</a><br>
 </body>
 </html>
