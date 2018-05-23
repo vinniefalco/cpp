@@ -47,7 +47,14 @@ Document number: D0000R0<br>
 
 <ul>
 <li><a href="#Introduction">Introduction</a></li>
-<li><a href="#Description">Description</a></li>
+<li><a href="#Description">Description</a>
+    <ul>
+    <li><a href="#Async">Asynchronous Operations</a>
+    <li><a href="#Composition">Problem with Composition</a>
+    <li><a href="#Exception">Problem with Exceptions</a>
+    <li><a href="#Workarounds">Problem with Workarounds</a>
+    </ul>
+</li>
 <li><a href="#Solution">Solution</a></li>
 <li><a href="#References">References</a></li>
 </ul>
@@ -85,7 +92,7 @@ obtained by calling <tt>prepare</tt>. Then, after the algorithm has placed zero
 or more bytes at the beginning of the sequence the function <tt>commit</tt> is
 called to move some or all of that data to the sequence representing the readable
 bytes. The term "move" here is notional: the dynamic buffer concept does not
-require memory move (nor is it disallowed). The following code reads from a
+require (nor disallow) a memory move. The following code reads from a
 socket into a dynamic buffer:
 </p>
 <blockquote><pre>
@@ -142,7 +149,7 @@ the boundaries between the readable and writable bytes, as well as the maximum
 allowed size of the total of the readable and writable bytes.
 <p/>
 
-<h3>Asynchronous Operations</h3>
+<a name="Async"></a><h3>Asynchronous Operations</h3>
 <p>
 Thus far we have shown synchronous (blocking) examples. Asynchronous algorithms
 are started by a call to an <em>initiating function</em> which returns immediately.
@@ -180,9 +187,9 @@ destroyed no later than immediately after invocation of the completion handler.
 </p>
 </blockquote>
 <p>
-Given the guidance above, the most sensible approach is for the implementation
-to move or make a decay-copy of the argument. An implementation of the TS,
-authored by the principal architect of the TS, does precisely that:
+The most sensible implementation, given the wording above, is to move or make
+a decay-copy of the argument. An implementation authored by the principal
+architect of the TS, does precisely that:
 </p>
 <blockquote><pre>
 template &lt;
@@ -261,13 +268,12 @@ the result is called a <em>composed operation</em>. For example, <tt>async_read<
 implemented in terms of zero or more calls to a stream's <tt>async_read_some</tt> algorithm. 
 Layers of composition may be added to arbitrary degree, permitting algorithms of
 significant complexity to be developed. A composed operation is typically implemented
-as a movable (or copyable) function object containing additional state. When
-the composed operation calls an intermediate initiating function, it passes
-<tt>std::move(*this)</tt> as the completion handler. This idiom, informally
-known as "stack-ripping" is used for reasons related to the optimization of
-memory allocation during asynchronous continuations (and beyond the scope of
-this paper). Here is the function call operator for the <tt>async_read_until</tt>
-operation described above:
+as a movable function object containing additional state. When the composed
+operation calls an intermediate initiating function, it passes <tt>std::move(*this)</tt>
+as the completion handler. This idiom, informally known as "stack-ripping" is used for
+reasons related to the optimization of memory allocation during asynchronous continuations
+(and beyond the scope of this paper). Here is the function call operator for the
+<tt>async_read_until</tt> operation described above:
 </p>
 <blockquote><pre>
 void read_until_op::operator()(const std::error_code& ec,
@@ -283,12 +289,16 @@ void read_until_op::operator()(const std::error_code& ec,
 </pre></blockquote>
 <p>
 Care must be taken when using this idiom, as the memory location of data
-members belonging to the operation will change every time an initiating
-function is invoked. This will become important in the description below.
+members belonging to the function object will necessarily change every time
+an initiating function is invoked. The implication is that lvalue references
+belonging to any of the data members of the function object may not
+be passed to intermediate initiating functions. This prevents internal
+interfaces where dynamic buffers are passed by reference.
 </p>
 
-<h3>Problem: Composition</h3>
 
+
+<a name="Composition"></a><h3>Problem with Composition</h3>
 <p>
 When only one composed operation handles the dynamic buffer, things seem to
 work. However, if a composed operation wishes to invoke another composed
@@ -300,7 +310,7 @@ passing <tt>std::move(*this)</tt> as the completion handler using the stack
 ripping idiom described above. At this point, <tt>async_bar</tt> must also
 make a copy for the reasons stated earlier. Copies share the underlying storage,
 but in the case of dynamic string buffers each copy maintains its own distinct
-metadata (we note that the specification of the TS goes against the author's
+metadata (we note that the specification in the TS goes against the author's
 description of dynamic buffer semantics in LWG#3072). When <tt>async_bar</tt>
 has finished mutating the dynamic buffer and returns control back by invoking
 the intermediate completion handler representing <tt>async_foo</tt>, the metadata
@@ -308,21 +318,30 @@ in the copy of the dynamic buffer held by <tt>async_foo</tt> will not have the
 changes made by <tt>async_bar</tt>, as seen here:
 </p>
 <blockquote><pre>
-void read_until_op::operator()(const std::error_code& ec,
+void async_foo::operator()(const std::error_code& ec,
                                std::size_t bytes_transferred, int start = 0)
 {
     ...
     
-    // `async_read` will operate on a decay-copy of buffers_,
+    // `async_bar` will operate on a decay-copy of buffers_,
     // which has its own metadata.
     //
-    async_read(stream_, buffers_, std::move(*this));
+    async_bar(stream_, buffers_, std::move(*this));
 
     ...
 }
 </pre></blockquote>
+<p>
+For example, if the dynamic buffer is an instance of <tt>dynamic_string_buffer</tt>,
+the call to <tt>async_bar</tt> may increase the length of the string. But when the
+intermediate asynchronous operation completes, the function object representing
+the <tt>async_foo</tt> operation will have a copy of the dynamic buffer whose
+<tt>size_</tt> data member does not reflect the new bytes.
+</p>
 
-<h3> Problem: Exception Safety</h3>
+
+
+<a name="Exception"></a><h3>Problem with Exceptions</h3>
 <p>
 Another design problem caused by adding metadata to the dynamic buffer concept
 is illustrated in the following example code:
@@ -353,25 +372,27 @@ int main()
 While not technically incorrect, it may be surprising to the user that
 the string contains additional value-initialized data which was not part
 of the original readable bytes (which in this case was empty). The wording of
-the dynamic buffer concept does not address this case.
+<b>DynamicBuffer</b> and <tt>dynamic_string_buffer</tt> do not address
+the effect of exceptions on state of the readable bytes in the underlying
+container at all.
 </p>
 
-<a name="Workaround"></a><h2>Workaround</h2>
+<a name="Workarounds"></a><h3>Problem with Workarounds</h3>
 <p>
 The problem of composition can be solved using the current specification of
 <b>DynamicBuffer</b> by creating a copyable, reference-counted wrapper which
-holds a decay-copy of the dynamic buffer argument. Here is a sketch of part
-of a wrapper:
+holds a decay-copy of the dynamic buffer argument. Here is a partial sketch
+of that wrapper:
 </p>
 <blockquote><pre>
 template&lt;class DynamicBuffer&gt;
-class shared_arg
+class shared_buffer
 {
     std::shared_ptr&lt;DynamicBuffer&gt; p_;
 
 public:
     template&lt;class Deduced&gt;
-    explicit shared_arg(Deduced&amp;&amp; b)
+    explicit shared_buffer(Deduced&amp;&amp; b)
         : p_(std::make_shared&lt;DynamicBuffer&gt;(std::forward<Deduced>(b)))
     {
     }
@@ -408,10 +429,10 @@ async_read_until(
 
   read_until_delim_op&lt;
     AsyncReadStream,
-    shared_arg&lt;typename std::decay&lt;DynamicBuffer&gt;::type&gt;,
+    shared_buffer&lt;typename std::decay&lt;DynamicBuffer&gt;::type&gt;,
     NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
         s,
-        shared_arg&lt;typename std::decay&lt;DynamicBuffer&gt;::type&gt{std::move(buffers)},
+        shared_buffer&lt;typename std::decay&lt;DynamicBuffer&gt;::type&gt{std::move(buffers)},
         delim,
         init.completion_handler)(std::error_code(), 0, 1);
 
@@ -420,7 +441,8 @@ async_read_until(
 </pre></blockquote>
 <p>
 This workaround comes at the expense of one or more additional unnecessary
-dynamic allocations.
+dynamic allocations. Utilizing the workaround would sacrifice an important
+C++ value: zero-cost abstractions.
 </p>
 
 </p>
