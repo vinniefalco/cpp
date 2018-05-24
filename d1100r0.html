@@ -38,7 +38,7 @@
 Document number: D1100R0<br>
 <br>
 <a href="mailto:vinnie.falco@gmail.com">Vinnie Falco</a><br>
-2018-05-23<br>
+2018-05-24<br>
 </address>
 <hr>
 <h1>Efficient composition with DynamicBuffer</h1>
@@ -187,9 +187,9 @@ destroyed no later than immediately after invocation of the completion handler.
 </p>
 </blockquote>
 <p>
-The most sensible implementation, given the wording above, is to move or make
-a decay-copy of the argument. An implementation authored by the principal
-architect of the TS, does precisely that:
+Given that the requirement for dynamic buffers is that they are <b>MoveConstructible</b>,
+a sensible implementation will make a decay-copy of the argument. An implementation
+authored by the principal architect of the TS, does precisely that:
 </p>
 <blockquote><pre>
 template &lt;
@@ -305,17 +305,15 @@ work. However, if a composed operation wishes to invoke another composed
 operation on that dynamic buffer, a problem arises. Consider two composed
 operations <tt>async_foo</tt> and <tt>async_bar</tt>, which both operate on
 an instance of dynamic buffer. When <tt>async_foo</tt> is invoked, it makes
-a copy of the dynamic buffer and then calls <tt>async_bar</tt> with the copy,
+a decay-copy of the dynamic buffer and then calls <tt>async_bar</tt> with it,
 passing <tt>std::move(*this)</tt> as the completion handler using the stack
 ripping idiom described above. At this point, <tt>async_bar</tt> must also
-make a copy for the reasons stated earlier. Copies share the underlying storage,
-but in the case of dynamic string buffers each copy maintains its own distinct
-metadata (we note that the specification in the TS goes against the author's
-description of dynamic buffer semantics in LWG#3072). When <tt>async_bar</tt>
-has finished mutating the dynamic buffer and returns control back by invoking
-the intermediate completion handler representing <tt>async_foo</tt>, the metadata
-in the copy of the dynamic buffer held by <tt>async_foo</tt> will not have the
-changes made by <tt>async_bar</tt>, as seen here:
+make a decay-copy for the reasons stated earlier. Copies share the underlying
+storage, but <b>DynamicBuffer</b> only allows move construction. The caller
+cannot depend on the state of the moved-from dynamic buffer. When <tt>async_bar</tt>
+has finished mutating the dynamic buffer, control passes to the parent
+completion handler. The completion handler's dynamic buffer is in the moved-from
+state and cannot be used again:
 </p>
 <blockquote><pre>
 void async_foo::operator()(const std::error_code& ec,
@@ -323,21 +321,13 @@ void async_foo::operator()(const std::error_code& ec,
 {
     ...
     
-    // `async_bar` will operate on a decay-copy of buffers_,
-    // which has its own metadata.
+    // this->buffers_ is moved-from when the following call returns.
     //
     async_bar(stream_, buffers_, std::move(*this));
 
     ...
 }
 </pre></blockquote>
-<p>
-For example, if the dynamic buffer is an instance of <tt>dynamic_string_buffer</tt>,
-the call to <tt>async_bar</tt> may increase the length of the string. But when the
-intermediate asynchronous operation completes, the function object representing
-the <tt>async_foo</tt> operation will have a copy of the dynamic buffer whose
-<tt>size_</tt> data member does not reflect the new bytes.
-</p>
 
 
 
