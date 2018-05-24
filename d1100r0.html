@@ -452,7 +452,13 @@ The solution we propose is to change the semantics of <b>DynamicBuffer</b>
 to represent a true storage type rather than a hybrid reference with metadata.
 Instances of dynamic buffers will be passed by reference, and callers will
 be required to manage the lifetime of dynamic buffer objects for the duration
-of any asynchronous operations. An additional benefit of this change is that
+of any asynchronous operations. As the caller is already responsible for
+maintaining the lifetime of the stream, and the <tt>string</tt> or <tt>vector</tt>
+under the old scheme, maintaining the lifetime of the dynamic buffer in the
+new scheme poses no additional burden.
+</p>
+<p>
+An additional benefit of this change is that
 it also solves the problem of exceptions described above.
 </p>
 
