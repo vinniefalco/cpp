@@ -201,6 +201,7 @@ template &lt;
 class read_until_delim_op
 {
 public:
+    // Note: DeducedBuffers will be DynamicBuffer plus cv-ref qualifiers
     template &lt;typename DeducedBuffers&gt;
     read_until_delim_op(
         AsyncReadStream&amp; stream,
