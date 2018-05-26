@@ -201,14 +201,14 @@ template &lt;
 class read_until_delim_op
 {
 public:
-    // Note: DeducedBuffers will be DynamicBuffer plus cv-ref qualifiers
-    template &lt;typename DeducedBuffers&gt;
+    // Note: DeducedDynamicBuffer will be DynamicBuffer plus cv-ref qualifiers
+    template &lt;typename DeducedDynamicBuffer&gt;
     read_until_delim_op(
         AsyncReadStream&amp; stream,
-        DeducedBuffers&amp;&amp; buffers,
+        DeducedDynamicBuffer&amp;&amp; buffers,
         char delim, ReadHandler&amp; handler)
     : [&hellip;]
-      buffers_(std::forward&lt;DeducedBuffers&gt;(buffers))
+      buffers_(std::forward&lt;DeducedDynamicBuffer&gt;(buffers))
       [&hellip;]
     {
     }
