@@ -207,7 +207,7 @@ public:
         DeducedBuffers&amp;&amp; buffers,
         char delim, ReadHandler&amp; handler)
     : [&hellip;]
-      buffers_(std::move(buffers))
+      buffers_(std::forward&lt;DeducedBuffers&gt;(buffers))
       [&hellip;]
     {
     }
@@ -245,7 +245,7 @@ async_read_until(
     typename std::decay&lt;DynamicBuffer&gt;::type,
     NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
         s,
-        std::move(buffers),
+        std::forward&lt;DynamicBuffer&gt;(buffers),
         delim,
         init.completion_handler)(std::error_code(), 0, 1);
 
