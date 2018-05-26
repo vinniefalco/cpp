@@ -38,7 +38,7 @@
 Document number: D1100R0<br>
 <br>
 <a href="mailto:vinnie.falco@gmail.com">Vinnie Falco</a><br>
-2018-05-24<br>
+2018-05-26<br>
 </address>
 <hr>
 <h1>Efficient composition with DynamicBuffer</h1>
@@ -192,6 +192,8 @@ a sensible implementation will make a decay-copy of the argument. An implementat
 authored by the principal architect of the TS, does precisely that:
 </p>
 <blockquote><pre>
+namespace detail {
+
 template &lt;
     typename AsyncReadStream,
     typename DynamicBuffer,
@@ -205,7 +207,7 @@ public:
         DeducedBuffers&amp;&amp; buffers,
         char delim, ReadHandler&amp; handler)
     : [&hellip;]
-      buffers_(std::forward&lt;DeducedBuffers&gt;(buffers))
+      buffers_(std::move(buffers))
       [&hellip;]
     {
     }
@@ -216,6 +218,8 @@ public:
     DynamicBuffer buffers_;
     [&hellip;]
 };
+
+} // detail
 
 template &lt;
     typename AsyncReadStream,
@@ -236,7 +240,7 @@ async_read_until(
   async_completion&lt;ReadHandler,
     void (std::error_code, std::size_t)&gt; init(handler);
 
-  read_until_delim_op&lt;
+  detail::read_until_delim_op&lt;
     AsyncReadStream,
     typename std::decay&lt;DynamicBuffer&gt;::type,
     NET_TS_HANDLER_TYPE(ReadHandler, void (std::error_code, std::size_t))&gt;(
