@@ -315,8 +315,8 @@ is invoked, it takes ownership of the buffer via move. However, if
 <tt>async_http_read</tt> needs to invoke <tt>async_http_read_some</tt>
 again to fufill its contract, it cannot do so without depending on undefined
 behavior. This is because on the second and subsequent invocations of
-<tt>async_http_read_some</tt>, the buffer is in a moved-from state.
-The specification of <b>DynamicBuffer</b> is silent on the condition of
+<tt>async_http_read_some</tt>, the buffer is in a moved-from state, and
+the specification of <b>DynamicBuffer</b> is silent on the condition of
 moved-from objects. This can be seen in the implementation of the functions
 described above, which come from the Boost.Beast [2] library:
 </p>
@@ -354,12 +354,12 @@ public:
             }
             for(;;)
             {
-                // The call to async_read_some will produce undefined
-                // behavior on the second and subsequent calls, since
-                // buffer_ is in the moved-from state:
+                // The call to async_http_read_some will produce
+                // undefined behavior on the second and subsequent
+                // calls, since buffer_ is in the moved-from state:
                 //
                 BOOST_ASIO_CORO_YIELD
-                async_read_some(
+                async_http_read_some(
                     stream_, std::move(buffer_), parser_, std::move(*this));
 
                 if(ec)
@@ -517,10 +517,10 @@ as indicated:</p>
 <i>// 16.11 [networking.ts::buffer.creation], buffer creation:</i>
 [&hellip;]
 
-template&lt;class T, class Allocator&gt;
+template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
 class dynamic_vector_buffer;
 
-template&lt;class CharT, class Traits, class Allocator&gt;
+template&lt;class CharT, class Traits<ins> = std::char_traits&lt;CharT&gt;</ins>, class Allocator<ins> = allocator&lt;CharT&gt;</ins>&gt;
 class <ins>basic_</ins>dynamic_string_buffer;
 
 <del><i>// 16.14 [networking.ts::buffer.dynamic.creation], dynamic buffer creation:</i></del>
@@ -644,7 +644,7 @@ as well as the additional requirements listed in Table 14.
 <blockquote><pre>
 [&hellip;]
 
-template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
+template&lt;class T, class Allocator&gt;
 class dynamic_vector_buffer
 {
 public:
