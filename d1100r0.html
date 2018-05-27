@@ -663,7 +663,7 @@ public:
   <em>// members:</em>
   size_t size() const noexcept;
   size_t max_size() const noexcept;
-  <ins>void max_size(size_t maximum_size);</ins>
+  <ins>void max_size(size_t maximum_size) noexcept;</ins>
   size_t capacity() const noexcept;
   const_buffers_type data() const noexcept;
   mutable_buffers_type prepare(size_t n);
@@ -784,7 +784,7 @@ public:
   <em>// members:</em>
   size_t size() const noexcept;
   size_t max_size() const noexcept;
-  <ins>void max_size(size_t maximum_size)</ins>
+  <ins>void max_size(size_t maximum_size) noexcept;</ins>
   size_t capacity() const noexcept;
   const_buffers_type data() const noexcept;
   mutable_buffers_type prepare(size_t n);
