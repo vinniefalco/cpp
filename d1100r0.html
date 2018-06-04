@@ -484,6 +484,46 @@ C++ value: zero-cost abstractions.
 </p>
 <a name="Solution"></a><h2>Solution</h2>
 <p>
+The Net.TS predecessors Asio and Boost.Asio offered only the single
+concrete type <tt>basic_streambuf</tt> which addressed the problem of
+stream algorithms which need to write a dynamic number of octets. The
+interface to <tt>basic_streambuf</tt> almost perfectly matches the
+requirements of <b>DynamicBuffer</b>.
+Field experience showed that users had trouble manipulating buffer sequences,
+often writing code which performed unnecessary allocate/copy/free cycles
+to get the data in the format they desired. Users loudly declared the
+desire to send and receive their data using traditional containers such
+as <tt>string</tt> and <tt>vector</tt> with which they are already very
+familiar.
+</p>
+<p>
+To support the use of strings and vectors in stream algorithms, the
+<b>DynamicBuffer</b> concept is fashioned as a non-owning reference wrapper
+to a supported container type whose lifetime is managed by the caller. Algorithms
+which accept dynamic buffer parameters use a forwarding reference, and take
+ownership via decay-copy. Net.TS provides some functions which accept a
+reference to a user-managed container and return a suitable wrapper. These
+functions are designed for ease of use, as they may be invoked directly at
+call sites:
+</p>
+<blockquote><pre>
+<i>// 16.14 [networking.ts::buffer.dynamic.creation], dynamic buffer creation:</i>
+
+template&lt;class T, class Allocator&gt;
+  dynamic_vector_buffer&lt;T, Allocator&gt;
+  dynamic_buffer(vector&lt;T, Allocator&gt;&amp; vec) noexcept;
+template&lt;class T, class Allocator&gt;
+  dynamic_vector_buffer&lt;T, Allocator&gt;
+  dynamic_buffer(vector&lt;T, Allocator&gt;&amp; vec, size_t n) noexcept;
+
+template&lt;class CharT, class Traits, class Allocator&gt;
+  dynamic_string_buffer&lt;CharT, Traits, Allocator&gt;
+  dynamic_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str) noexcept;
+template&lt;class CharT, class Traits, class Allocator&gt;
+  dynamic_string_buffer&lt;CharT, Traits, Allocator&gt;
+  dynamic_buffer(basic_string&lt;CharT, Traits, Allocator&gt;&amp; str, size_t n) noexcept;
+</pre></blockquote>
+<p>
 The solution we propose is to change the semantics of <b>DynamicBuffer</b>
 to represent a true storage type rather than a hybrid reference with metadata.
 Instances of dynamic buffers will be passed by reference, and callers will
@@ -491,13 +531,46 @@ be required to manage the lifetime of dynamic buffer objects for the duration
 of any asynchronous operations. As the caller is already responsible for
 maintaining the lifetime of the stream, and the <tt>string</tt> or <tt>vector</tt>
 under the old scheme, maintaining the lifetime of the dynamic buffer in the
-new scheme poses no additional burden.
+new scheme poses no additional burden. To solve the problem of exceptions,
+our solution refactors the dynamic buffer wrappers to own their corresponding
+string and vector. The caller can only take ownership of the container by
+calling a member function. The implementation then has the opportunity to
+adjust the container to reflect the correct state before the caller receives
+the value.
 </p>
 <p>
-An additional benefit of this change is that
-it also solves the problem of exceptions described above.
+We believe that there is a tension between ease of use and utility. The current
+specification provides ease of use but lacks utility, specifically the ability
+to compose higher level operations out of lower level ones which operate on
+dynamic buffers. The solution we propose goes in the opposite direction,
+sacrificing some ease of use in exchange for the ability to compose. The
+author of this paper favor composition over ease of use for a few reasons.
+First, because C++ should always prioritize zero-cost abstractions as
+a primary factor to differentiate itself from other languages. And second,
+because the entirety of Net.TS provides <em>low-level abstractions</em>. Most
+users should not be concerning themselves with interacting at the raw TCP/IP
+level. Instead they should be working with high level interfaces such as
+HTTP client APIs, WebSocket framework APIs, REST SDKs, and the like. These
+high level interfaces do not exist yet, but with the standardization of low
+level networking provided in Net.TS we are confident they will arrive in
+due time.
 </p>
-
+<p>
+Note that writing asynchronous code in a clean style which uses all the
+modern idioms of Asio and Net.TS is quite a difficult endeavor, as evidenced
+by the distinct lack of open source libraries built on Asio which follow
+best practices (despite Asio having been available for over a decade).
+Furthermore the number of people who need to author components which interact
+directly with low-level interfaes such as Asio or Net.TS should be few in number.
+Therefore, we favor a Net.TS specification which addresses the needs for
+writers of specialized middleware and high-level interfaces over ordinary
+users.
+</p>
+<p>
+The author of this paper is not entirely satisfied with the proposed solution,
+and believes that finding the right solution which balances the needs of utility
+with ease of use is probably best left to the LEWG.
+</p>
 
 <a name="Wording"></a><h2>Proposed Wording</h2>
 <p>This wording is relative to <a href="http://wg21.link/n4734">N4734</a>.</p>
