@@ -593,8 +593,10 @@ as indicated:</p>
 template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
 class dynamic_vector_buffer;
 
-template&lt;class CharT, class Traits<ins> = std::char_traits&lt;CharT&gt;</ins>, class Allocator<ins> = allocator&lt;CharT&gt;</ins>&gt;
+template&lt;class CharT, class Traits<ins> = char_traits&lt;CharT&gt;</ins>, class Allocator<ins> = allocator&lt;CharT&gt;</ins>&gt;
 class <ins>basic_</ins>dynamic_string_buffer;
+
+<ins>using dynamic_string_buffer = basic_dynamic_string_buffer&lt;char&gt;;</ins>
 
 <del><i>// 16.14 [networking.ts::buffer.dynamic.creation], dynamic buffer creation:</i></del>
 
@@ -717,7 +719,7 @@ as well as the additional requirements listed in Table 14.
 <blockquote><pre>
 [&hellip;]
 
-template&lt;class T, class Allocator&gt;
+template&lt;class T, class Allocator<ins> = allocator&lt;T&gt;</ins>&gt;
 class dynamic_vector_buffer
 {
 public:
@@ -727,11 +729,13 @@ public:
   using mutable_buffers_type = mutable_buffer;
   
   <em>// constructors:</em>
-  <ins>dynamic_vector_buffer() = default;</ins>
+  <ins>dynamic_vector_buffer();</ins>
   <ins>explicit dynamic_vector_buffer(size_t maximum_size);</ins>
-  explicit dynamic_vector_buffer(vector&lt;T, Allocator&gt;<del>&amp;</del> vec) <del>noexcept;</del>
-  dynamic_vector_buffer(vector&lt;T, Allocator&gt;<del>&amp;</del> vec, size_t maximum_size) <del>noexcept;</del>
-  dynamic_vector_buffer(dynamic_vector_buffer&amp;&amp;) = default;
+  explicit dynamic_vector_buffer(<del>vector&lt;T, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> vec) noexcept;
+  dynamic_vector_buffer(<del>vector&lt;T, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> vec, size_t maximum_size)<del> noexcept</del>;
+  dynamic_vector_buffer(dynamic_vector_buffer&amp;&amp;<ins> other</ins>)<del> = default</del><ins> noexcept</ins>;
+  
+  <ins>dynamic_vector_buffer&amp; operator=(const dynamic_vector_buffer&amp;) = delete;</ins>
   
   <em>// members:</em>
   size_t size() const noexcept;
@@ -742,11 +746,11 @@ public:
   mutable_buffers_type prepare(size_t n);
   void commit(size_t n);
   void consume(size_t n);
-  <ins>span&lt;const T&gt; get() const noexcept</ins>
+  <ins>span&lt;const T&gt; get() const noexcept;</ins>
   <ins>value_type release();</ins>
 
 private:
-  vector&lt;T, Allocator&gt;<del>&amp;</del> vec_; <em>// exposition only</em>
+  <del>vector&lt;T, Allocator&gt;&amp;</del> <ins>value_type</ins> vec_; <em>// exposition only</em>
   size_t size_; <em>// exposition only</em>
   <del>const</del> size_t max_size_; <em>// exposition only</em>
 };
@@ -759,7 +763,16 @@ private:
 -3- [&hellip;]
 </p>
 <pre>
-<ins>explicit dynamic_vector_buffer(size_t maximum_size)</ins>
+<ins>dynamic_vector_buffer();</ins>
+</pre>
+<blockquote>
+<p>
+<ins>-?- <em>Effects:</em> Default-constructs <tt>vec_</tt>. Initializes <tt>size_</tt> with <tt>0</tt>, and 
+<tt>max_size_</tt> with <tt>vec_.max_size()</tt>.</ins>
+</p>
+</blockquote>
+<pre>
+<ins>explicit dynamic_vector_buffer(size_t maximum_size);</ins>
 </pre>
 <blockquote>
 <p>
@@ -768,24 +781,34 @@ private:
 </p>
 </blockquote>
 <pre>
-explicit dynamic_vector_buffer(vector&lt;T, Allocator&gt;<del>&amp;</del> vec) <del>noexcept</del>
+explicit dynamic_vector_buffer(<del>vector&lt;T, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> vec) noexcept;
 </pre>
 <blockquote>
 <p>
--4- <em>Effects:</em> Initializes <tt>vec_</tt> with <tt><ins>move(</ins>vec<ins>)</ins></tt>,
-  <tt>size_</tt> with <tt>vec<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>vec<ins>_</ins>.max_size()</tt>
+-4- <em>Effects:</em> Initializes <tt>vec_</tt> with <tt><ins>std::move(</ins>vec<ins>)</ins></tt>,
+  <tt>size_</tt> with <tt>vec<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>vec<ins>_</ins>.max_size()</tt>.
 </p>
 </blockquote>
 <pre>
-dynamic_vector_buffer(vector&lt;T, Allocator&gt;<del>&amp;</del> vec,
+dynamic_vector_buffer(<del>vector&lt;T, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> vec,
                       size_t maximum_size) <del>noexcept</del>;
 </pre>
 <blockquote>
 <p>
--5- <em>Requires:</em> <tt>vec.size() &lt;= maximum_size</tt>
+-5- <em>Requires:</em> <tt>vec.size() &lt;= maximum_size</tt>.
 <p/>
--6- <em>Effects:</em> Initializes <tt>vec_</tt> with <tt><ins>move(</ins>vec<ins>)</ins></tt>,
+-6- <em>Effects:</em> Initializes <tt>vec_</tt> with <tt><ins>std::move(</ins>vec<ins>)</ins></tt>,
   <tt>size_</tt> with <tt>vec<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>maximum_size</tt>.
+</p>
+</blockquote>
+<pre>
+<ins>dynamic_vector_buffer(dynamic_vector_buffer&amp;&amp; other) noexcept;</ins>
+</pre>
+<blockquote>
+<p>
+<ins>-?- <em>Effects:</em> Initializes <tt>vec_</tt> with <tt>std::move(other.vec_)</tt>,
+  <tt>size_</tt> with <tt>other.size_</tt>, and <tt>max_size_</tt> with <tt>other.max_size_</tt>. Then calls
+  <tt>other.vec_.clear();</tt> and assigns 0 to <tt>other.size_</tt>.</ins>
 <p/>
 [&hellip;]
 </p>
@@ -799,10 +822,12 @@ size_t max_size() const noexcept;
 </p>
 </blockquote>
 <pre>
-<ins>void max_size(size_t maximum_size)</ins>
+<ins>void max_size(size_t maximum_size);</ins>
 </pre>
 <blockquote>
 <p>
+<ins>-?- <em>Requires:</em> <tt>size() &lt;= maximum_size</tt>.</ins> 
+<p/>
 <ins>-?- <em>Effects:</em> Performs <tt>max_size_ = maximum_size</tt>.</ins>
 </p>
 </blockquote>
@@ -816,7 +841,7 @@ void consume(size_t n);
 </p>
 </blockquote>
 <pre>
-<ins>span&lt;const T&gt; get() const noexcept</ins>
+<ins>span&lt;const T&gt; get() const noexcept;</ins>
 </pre>
 <blockquote>
 <p>
@@ -824,11 +849,20 @@ void consume(size_t n);
 </p>
 </blockquote>
 <pre>
-<ins>value_type release()</ins>
+<ins>value_type release();</ins>
 </pre>
 <blockquote>
 <p>
-<ins>-?- <em>Returns:</em> <tt>move(vec_)</tt>.</ins>
+<ins>-?- <em>Effects:</em> Equivalent to:</ins>
+<blockquote>
+<pre><ins>
+vec_.resize(size_);
+value_type tmp = std::move(vec_);
+vec_.clear();
+size_ = 0;
+return tmp;
+</ins></pre>
+</blockquote>
 </p>
 </blockquote>
 </blockquote>
@@ -838,7 +872,7 @@ void consume(size_t n);
 
 <blockquote>
 <blockquote><pre>
-template&lt;class CharT, class Traits, class Allocator&gt;
+template&lt;class CharT, class Traits<ins> = char_traits&lt;CharT&gt;</ins>, class Allocator<ins> = allocator&lt;CharT&gt;</ins>&gt;
 class <ins>basic_</ins>dynamic_string_buffer
 {
 public:
@@ -848,12 +882,14 @@ public:
   using mutable_buffers_type = mutable_buffer;
 
   <em>// constructors:</em>
-  <ins>basic_dynamic_string_buffer() = default;</ins>
+  <ins>basic_dynamic_string_buffer();</ins>
   <ins>explicit basic_dynamic_string_buffer(size_t maximum_size);</ins>
-  explicit <ins>basic_</ins>dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str) <del>noexcept;</del>
-  <ins>basic_</ins>dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str, size_t maximum_size) <del>noexcept;</del>
-  <ins>basic_</ins>dynamic_string_buffer(<ins>basic_</ins>dynamic_string_buffer&amp;&amp;) = default;
+  explicit <ins>basic_</ins>dynamic_string_buffer(<del>basic_string&lt;CharT, Traits, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> str) noexcept;
+  <ins>basic_</ins>dynamic_string_buffer(<del>basic_string&lt;CharT, Traits, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> str, size_t maximum_size) <del>noexcept</del>;
+  <ins>basic_</ins>dynamic_string_buffer(<ins>basic_</ins>dynamic_string_buffer&amp;&amp;<ins> other</ins>)<del> = default</del><ins> noexcept</ins>;
 
+  <ins>basic_dynamic_string_buffer&amp; operator=(basic_dynamic_string_buffer&amp;&amp;) = delete;</ins>
+  
   <em>// members:</em>
   size_t size() const noexcept;
   size_t max_size() const noexcept;
@@ -863,17 +899,14 @@ public:
   mutable_buffers_type prepare(size_t n);
   void commit(size_t n) noexcept;
   void consume(size_t n);
-  <ins>basic_string_view&lt;CharT, Traits&gt; get() const noexcept</ins>
+  <ins>basic_string_view&lt;CharT, Traits&gt; get() const noexcept;</ins>
   <ins>value_type release();</ins>
 
 private:
-  basic_string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str_; <em>// exposition only</em>
+  <del>basic_string&lt;CharT, Traits, Allocator&gt;&amp;</del> <ins>value_type</ins> str_; <em>// exposition only</em>
   size_t size_; <em>// exposition only</em>
   <del>const </del>size_t max_size_; <em>// exposition only</em>
 };
-
-<ins>using dynamic_string_buffer =
-  basic_dynamic_string_buffer&lt;char, char_traits&lt;char&gt;, allocator&lt;char&gt;&gt;</ins>
 </pre>
 </blockquote>
 <p>
@@ -882,7 +915,16 @@ private:
 -3- [&hellip;]
 </p>
 <pre>
-<ins>explicit basic_dynamic_string_buffer(size_t maximum_size)</ins>
+<ins>basic_dynamic_string_buffer();</ins>
+</pre>
+<blockquote>
+<p>
+<ins>-?- <em>Effects:</em> Default-constructs <tt>str_</tt>. Initializes <tt>size_</tt> with <tt>0</tt>, and 
+<tt>max_size_</tt> with <tt>str_.max_size()</tt>.</ins>
+</p>
+</blockquote>
+<pre>
+<ins>explicit basic_dynamic_string_buffer(size_t maximum_size);</ins>
 </pre>
 <blockquote>
 <p>
@@ -892,25 +934,35 @@ private:
 <p>[&hellip;]</p>
 </blockquote>
 <pre>
-explicit <ins>basic_</ins>dynamic_string_buffer(basic_string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str) <del>noexcept</del>
+explicit <ins>basic_</ins>dynamic_string_buffer(<del>basic_string&lt;CharT, Traits, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> str) noexcept;
 </pre>
 <blockquote>
 <p>
--4- <em>Effects:</em> Initializes <tt>str_</tt> with <tt><ins>move(</ins>str<ins>)</ins></tt>,
+-4- <em>Effects:</em> Initializes <tt>str_</tt> with <tt><ins>std::move(</ins>str<ins>)</ins></tt>,
   <tt>size_</tt> with <tt>str<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>str<ins>_</ins>.max_size()</tt>
 </p>
 </blockquote>
 <pre>
-<ins>basic_</ins>dynamic_string_buffer(string&lt;CharT, Traits, Allocator&gt;<del>&amp;</del> str,
-                            size_t maximum_size) <del>noexcept</del>;
+<ins>basic_</ins>dynamic_string_buffer(<del>basic_string&lt;CharT, Traits, Allocator&gt;</del><ins>value_type</ins>&amp;<ins>&amp;</ins> str,
+                            size_t maximum_size)<del> noexcept</del>;
 </pre>
 <blockquote>
 <p>
 -5- <em>Requires:</em> <tt>str.size() &lt;= maximum_size</tt>.
 </p>
 <p>
--6- <em>Effects:</em> Initializes <tt>str_</tt> with <tt><ins>move(</ins>str<ins>)</ins></tt>,
+-6- <em>Effects:</em> Initializes <tt>str_</tt> with <tt><ins>std::move(</ins>str<ins>)</ins></tt>,
   <tt>size_</tt> with <tt>str<ins>_</ins>.size()</tt>, and <tt>max_size_</tt> with <tt>maximum_size</tt>.
+</p>
+</blockquote>
+<pre>
+<ins>basic_dynamic_string_buffer(basic_dynamic_string_buffer&amp;&amp; other) noexcept;</ins>
+</pre>
+<blockquote>
+<p>
+<ins>-?- <em>Effects:</em> Initializes <tt>str_</tt> with <tt>std::move(other.str_)</tt>,
+  <tt>size_</tt> with <tt>other.size_</tt>, and <tt>max_size_</tt> with <tt>other.max_size_</tt>. Then calls
+  <tt>other.str_.clear();</tt> and assigns 0 to <tt>other.size_</tt>.</ins>
 </p>
 <p>[&hellip;]</p>
 </blockquote>
@@ -923,10 +975,12 @@ size_t max_size() const noexcept;
 </p>
 </blockquote>
 <pre>
-<ins>void max_size(size_t maximum_size)</ins>
+<ins>void max_size(size_t maximum_size);</ins>
 </pre>
 <blockquote>
 <p>
+<ins>-?- <em>Requires:</em> <tt>size() &lt;= maximum_size</tt>.</ins> 
+<p/>
 <ins>-?- <em>Effects:</em> Performs <tt>max_size_ = maximum_size</tt>.</ins>
 </p>
 </blockquote>
@@ -940,25 +994,34 @@ void consume(size_t n);
 </p>
 </blockquote>
 <pre>
-<ins>basic_string_view&lt;CharT, Traits&gt; get() const noexcept</ins>
+<ins>basic_string_view&lt;CharT, Traits&gt; get() const noexcept;</ins>
 </pre>
 <blockquote>
 <p>
-<ins>-?- <em>Returns:</em> <tt>basic_string_view&lt;CharT, Traits&gt;(str_)</tt>.</ins>
+<ins>-?- <em>Returns:</em> <tt>basic_string_view&lt;CharT, Traits&gt;(str_.data(), size_)</tt>.</ins>
 </p>
 </blockquote>
 <pre>
-<ins>value_type release()</ins>
+<ins>value_type release();</ins>
 </pre>
 <blockquote>
 <p>
-<ins>-?- <em>Returns:</em> <tt>move(str_)</tt>.</ins>
+<ins>-?- <em>Effects:</em> Equivalent to:</ins>
+<blockquote>
+<pre><ins>
+str_.resize(size_);
+value_type tmp = std::move(str_);
+str_.clear();
+size_ = 0;
+return tmp;
+</ins></pre>
+</blockquote>
 </p>
 </blockquote>
 </blockquote>
 </li>
 
-<li><p>Remove 16.14 [networking.ts::buffer.dynamic.creation] entirely</p></li>
+<li><p>Remove 16.14 [networking.ts::buffer.dynamic.creation] entirely.</p></li>
 
 <li><p>Modify 17.5 [networking.ts::buffer.read], as indicated:</p>
 <blockquote>
