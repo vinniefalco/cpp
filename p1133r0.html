@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Networking TS Associations For Call Wrappers</title>
+    <style type="text/css">
+    p {text-align:justify}
+    li {text-align:justify}
+    blockquote.note
+    {
+        background-color:#E0E0E0;
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+    }
+    p.note
+    {
+        background-color:#E0E0E0;
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+    }
+    ins { background-color: #CCFFCC; }
+    del { background-color: #FFCCCC; }
+    .insert { background-color: #CCFFCC; }
+    address {text-align:right;}
+    h1 {text-align:center;}
+    span.comment {color:#C80000;}
+    code {white-space:pre;}
+    </style>
+</head>
+<body>
+<pre>
+Doc. no:  P1133R0
+Audience: LEWG
+Date:     2018-06-21
+Reply-To: Vinnie Falco (<a href="mailto:vinnie.falco@gmail.com">vinnie.falco@gmail.com</a>)
+</pre>
+<hr>
+<h1>Networking TS Associations For Call Wrappers</h1>
+
+
+
+<h2>Contents</h2>
+<ul>
+<li><a href="#Abstract">Abstract</a></li>
+<li><a href="#Introduction">Introduction</a>
+<li><a href="#Problem">Problem</a>
+<li><a href="#Solution">Solution</a></li>
+<li><a href="#Wording">Wording</a></li>
+<li><a href="#References">References</a></li>
+</ul>
+
+
+
+<a name="Abstract"></a><h2>Abstract</h2>
+<p>
+In [networking.ts] (also called "TS" henceforth) a <em>CompletionHandler</em>
+is a callable object invoked when an asynchronous operation has completed.
+The TS specifies customization points allowing an <em>executor</em>, a
+<em>proto-allocator</em>, or both, to be associated with an instance of a
+completion handler. Authors of asynchronous algorithms frequently need to bind
+parameters to a completion handler and submit the resulting call wrapper to
+another algorithm. Unfortunately when doing so with a lambda, or a forwarding
+call wrapper such as <tt>std::bind</tt>, customizations associated with the
+original completion handler are lost. This paper proposes wording which
+forwards TS associations to call wrappers returned by the standard library.
+</p>
+
+
+
+<a name="Introduction"></a><h2>Introduction</h2>
+<p>
+Asynchronous algorithms are started by a call to an <em>initiating function</em>
+which returns immediately. When the operation has completed, the implementation
+invokes a caller-provided function object called a <em>completion handler</em>
+with the result of the operation expressed as a parameter list. The following
+code shows calls to initiating functions with various types of completion
+handlers passed as the last argument.
+</p>
+
+<p>Using a lambda:</p>
+<blockquote><pre>
+async_read([&hellip;],
+    [](std::error_code ec, std::size_t)
+    {
+        if(ec)
+            std::cerr << ec.message() << "\n";
+    });
+</pre></blockquote>
+
+<p>Using a function object:</p>
+<blockquote><pre>
+struct my_completion
+{
+    void operator()(std::error_code, std::size_t);
+};
+
+async_read([&hellip;], my_completion{});
+</pre></blockquote>
+
+<p>Using a call wrapper:</p>
+<blockquote><pre>
+struct session
+{
+    [&hellip;]
+
+    void on_read(std::error_code, std::size_t)
+    {
+        async_read(sock_, buffers_,
+            std::bind(
+                &amp;session::on_read,
+                this,
+                std::placeholders::_1,
+                std::placeholders::_2));
+    }
+};
+</pre></blockquote>
+
+<p>
+To allow for greater control over memory allocations performed by the
+implementation or asynchronous algorithms, the TS allows an allocator to
+be associated with the type of the completion handler. This can be accomplished
+two ways.
+</p>
+<p>Intrusively, by adding a nested type and member function:</p>
+<blockquote><pre>
+struct my_completion
+{
+    using allocator_type = [&hellip;]
+
+    allocator_type get_allocator() const noexcept;
+
+    void operator()(std::error_code, std::size_t);
+};
+</pre></blockquote>
+<p>Or by specializing a class template:</p>
+<pre><blockquote>
+namespace std {
+namespace experimental {
+namespace net {
+
+template&lt;class Allocator&gt;
+struct associated_allocator&lt;my_completion&gt;
+{
+    using type = [&hellip;]
+
+    static type get(my_completion const& h, Allocator const& a = Allocator()) noexcept;
+};
+
+}}}
+</pre></blockquote>
+
+<p>
+The TS also allows control over the executor used to invoke the completion
+handler, through customizations similar to the associated allocator.
+</p>
+<p>Intrusively, by adding a nested type and member function:</p>
+<blockquote><pre>
+struct my_completion
+{
+    using executor_type = [&hellip;]
+
+    executor_type get_executor() const noexcept;
+
+    void operator()(std::error_code, std::size_t);
+};
+</pre></blockquote>
+<p>Or by specializing a class template:</p>
+<blockquote><pre>
+namespace std {
+namespace experimental {
+namespace net {
+
+template&lt;class Executor&gt;
+struct associated_executor&lt;my_completion&gt;
+{
+    using type = [&hellip;]
+
+    static type get(my_completion const& h, Executor const& ex = Executor()) noexcept;
+};
+
+}}}
+</pre></blockquote>
+
+
+
+<a name="Problem"></a><h2>Problem</h2>
+<p>
+Algorithms expressed in terms of other asynchronous algorithms are called
+<em>composed operations</em>. An initiating function constructs the composed
+operation as a callable function object containing the composed operation state
+as well as ownership of the caller's completion handler, and then invokes the
+resulting object. The class below implements a composed operation which reads
+from a stream asynchronously into a dynamic buffer until a condition is met
+(the corresponding initiating function is intentionally omitted):
+</p>
+<blockquote><pre>
+template&lt;
+    class AsyncReadStream,
+    class DynamicBuffer,
+    class Condition,
+    class Handler&gt;
+class read_until_op
+{
+    AsyncReadStream&amp; stream_;
+    DynamicBuffer&amp; buffer_;
+    Condition cond_;
+    Handler handler_;
+
+public:
+    read_until_op(
+        AsyncReadStream&amp; stream,
+        DynamicBuffer& buffer,
+        Condition const&amp; cond,
+        Handler handler)
+        : stream_(stream)
+        , buffer_(buffer)
+        , cond_(cond)
+        , handler_(std::move(handler))
+    {
+    }
+
+    void operator()(std::error_code ec, std::size_t bytes_transferred)
+    {
+        if(! ec)
+        {
+            if(bytes_transferred > 0)
+                buffer_.commit(bytes_transferred);
+
+            if(! cond_())
+                return stream_.async_read_some(
+                    buffer_.prepare(1024),
+                    std::move(*this));
+        }
+
+        handler_(ec);
+    }
+};
+</pre></blockquote>
+<p>
+The implementation above contains subtle but significant defects which have
+been a common source of bugs for years when using Asio or Boost.Asio. Any
+allocator or executor associated with <tt>Handler</tt> is not propagated to
+<tt>read_until_op</tt>, and thus will not be used in the implementation of
+the call to <tt>async_read_some</tt>. In particular multi-threaded network
+programs using the code above will experience undefined behavior when the
+associated executor of a completion handler is a <tt>strand</tt>, which
+is used to guarantee that handlers are not invoked concurrently.
+
+The code above may be fixed by associating the composed operation with the
+same executor and allocator associated with the final completion handler.
+The simpler, intrusive method may be used here as we have access to the
+necessary executor through the supplied stream:
+</p>
+<blockquote><pre>
+template&lt;
+    class AsyncReadStream,
+    class DynamicBuffer,
+    class Condition,
+    class Handler&gt;
+class read_until_op
+{
+    AsyncReadStream&amp; stream_;
+    DynamicBuffer&amp; buffer_;
+    Condition cond_;
+    Handler handler_;
+
+public:
+    read_until_op(
+        AsyncReadStream&amp; stream,
+        DynamicBuffer&amp; buffer,
+        Condition const&amp; cond,
+        Handler handler)
+        : stream_(stream)
+        , buffer_(buffer)
+        , cond_(cond)
+        , handler_(std::move(handler))
+    {
+    }
+
+    using allocator_type = std::experimental::net::associated_allocator&lt;Handler&gt;
+
+    allocator_type get_allocator() const noexcept
+    {
+        return std::experimental::net::get_associated_allocator(h_);
+    }
+
+    using executor_type = std::experimental::net::associated_executor&lt;
+        Handler, decltype(std::declval&lt;AsyncReadStream&&gt;().get_executor())&gt;
+
+    executor_type get_executor() const noexcept
+    {
+        return std::experimental::net::get_associated_executor(handler_, stream_.get_executor());
+    }
+
+    void operator()(std::error_code ec, std::size_t bytes_transferred)
+    {
+        if(! ec)
+        {
+            if(bytes_transferred > 0)
+                buffer_.commit(bytes_transferred);
+
+            if(! cond_())
+                return stream_.async_read_some(
+                    buffer_.prepare(1024),
+                    std::move(*this));
+        }
+
+        handler_(ec);
+    }
+};
+</pre></blockquote>
+<p>
+The addition of the nested types and member functions give <tt>read_until_op</tt>
+the same allocator and executor associated with the caller-provided completion
+handler. These associations are visible to other initiating functions, such as in
+the call to the stream's <tt>async_read_some</tt>. Unfortunately, the code above
+still has yet another subtle problem with significant consequences. Consider the
+case where <tt>cond_()</tt> evaluates to true upon the first invocation. The call
+to the stream's asynchronous read operation will be skipped, and the handler will
+be invoked directly with an error code indicating success. This violates the TS
+requirement that the final completion handler is invoked through the associated
+executor:
+</p>
+<blockquote>
+<b>13.2.7.12 Execution of completion handler on completion of asynchronous operation [async.reqmts.async.completion]</b>
+<p>
+If an asynchronous operation completes immediately (that is, within the thread
+of execution calling the initiating function, and before the initiating function
+returns), the completion handler shall be submitted for execution as if by
+performing <tt>ex2.post(std::move(f), alloc2)</tt>. Otherwise, the completion
+handler shall be submitted for execution as if by performing
+<tt>ex2.dispatch(std::move(f), alloc2)</tt>.
+</p>
+</blockquote>
+<p>
+The TS defines the helper functions <tt>post</tt> and <tt>dispatch</tt>
+to provide the allocator boilerplate in the executor expressions above.
+However, executors expect nullary function objects (invocable with no arguments).
+In order to submit a call to the handler in the code above, it is necessary
+to use a lambda to create a nullary function which invokes the handler with
+the bound error code. Use of the lambda, along with a bit of extra code to
+avoid a double dispatch for the case where the completion handler is invoked
+as a continuation of the call to <tt>async_read_some</tt> would look thusly:
+</p>
+<blockquote><pre>
+void read_until_op::operator()(
+    std::error_code ec, std::size_t bytes_transferred, bool is_continuation = true)
+{
+    if(! ec)
+    {
+        if(bytes_transferred > 0)
+            buffer_.commit(bytes_transferred);
+
+        if(! cond_())
+            return stream_.async_read_some(
+                buffer_.prepare(1024),
+                std::move(*this));
+    }
+
+    if(! is_continuation)
+        std::experimental::net::post(
+            stream_.get_executor(),
+            [self = std::move(*this), ec] { self_.handler_(ec); });
+    else
+        handler_(ec);
+}
+</pre></blockquote>
+<p>
+Astute observers may wonder why the handler is called directly when the
+composed operation is invoked as a continuation of the call to
+<tt>async_read_some</tt> instead of using the associated executor's
+<tt>dispatch</tt> function. The reason is that we are guaranteed that
+the composed operation was already invoked through the associated
+exector's dispatch function, because the implementation of <tt>async_read_some</tt>
+must meet the requirements of 13.2.7.12 [async.reqmts.async.completion].
+</p>
+<p>
+Readers without a deep understanding of Asio or [networking.ts] may not realize
+that the code above contains another defect. It suffers from the same problem
+found in the original implementation. The lambda type does not have the same
+allocator and executor associations as the final completion handler, thus
+violating contracts.
+</p>
+<p>
+Having the lambda forward the associated allocator and executor of the
+contained completion handler requires additional syntax and change to the
+language. This paper does not propose such a language change, as none of
+the possible changes explored by the author look palatable in the slightest.
+</p>
+<p>
+Since the intent of the statement in question is to bind arguments to a
+callable, to produce a new callable, a logical alternative is to consider
+using <tt>std::bind</tt>, which looks like this:
+</p>
+<blockquote><pre>
+std::experimental::net::post(
+    stream_.get_executor(),
+    std::bind(std::move(*this), ec));
+</pre></blockquote>
+<p>
+However, once again the code contains a defect! It does not solve the
+problem, because the call wrapper returned by <tt>bind</tt> does not
+forward the necessary associations. But unlike the lambda, in this
+case the type is emitted by the library. Therefore, the library can
+provide the specializations for the call wrapper.
+</p>
+
+
+
+<a name="Solution"></a><h2>Solution</h2>
+<p>
+The solution proposed in this paper is to specialize the [networking.ts]
+class templates <tt>associated_allocator</tt> and <tt>associated_executor</tt>
+for selected call wrappers returned by standard library functions. Each
+set of specializations will simply forward the allocator and executor
+associated with the wrapped function object to the call wrapper. We
+note that there is at least one paper in flight (P0356R1) which adds
+new call wrappers to the language, <tt>bind_front</tt> and <tt>bind_back</tt>.
+They will need a similar treatment.
+</p>
+
+<p>
+Here, some alternatives are explored and exploratory questions are answered:
+</p><ul>
+
+<li><p><b>Can't we use a lambda instead of a call wrapper?</b></p>
+<p>
+The problem with using a lambda expression to bind arguments to a completion
+handler is the implicit type-erasing of the captured completion handler. The
+anonymous type of the lambda expression emitted by the compiler is not part
+of any specialization of the TS class templates <tt>associated_allocator</tt> and
+<tt>associated_executor</tt>. Wording to address this in lambdas encounters
+strong headwinds:
+</p>
+<ul><li>
+The language specification now has a coupling to [networking.ts].
+</li><li>
+The language has no means to express that a lambda should inherit the
+associated allocator and executor of a captured completion handler.
+</li></ul>
+<p>
+For these reasons, this paper does not discuss solutions which require changes
+to the language itself.
+</p></li>
+
+<li><p><b>Shouldn't this apply to most call wrappers not just <tt>std::bind</tt>?</b></p>
+<p>
+In a nutshell, yes. However, specializations for type-erased call
+wrappers (e.g. <tt>std::function</tt>) are unimplementable.
+</p></li>
+
+<li><p><b>How often is a TS-aware call wrapper actually needed?</b></p>
+<p>
+Authors of composed operations will almost always need the facility
+described in this paper. We note that Asio[1], networking-ts-impl[2],
+and Beast[3] each contain their own implementations of call wrappers
+which forward the associated allocator and executor. Beast's interface
+is public, while the others are implementation details. More generally,
+the requirements specified in [networking.ts] 13.2.7.12 are difficult
+to meet without a TS-aware call wrapper. A survey of open source projects
+on GitHub shows that users repeatedly mistake losing the allocator and
+executor association of completion handlers by naive use of lambdas
+or call wrappers.
+</p></li>
+
+<li><p><b>Why did you design allocator and executor associations this way?</b></p>
+<p>
+Note that the author of this paper is not the author and architect of
+[networking.ts]. That person is Christopher Kohlhoff, who may be reached
+by email. While this author can answer some questions about design choices,
+ultimately it is the principal architect of the TS who can give accurate
+and comprehensive answers to question regarding design decisions.
+</p>
+
+<li><p><b>Is there a better way to implement these customization points?</b></p>
+<p>
+Changing the method used by the TS to specify the associated allocator and
+executor for completion handlers is out of scope for this paper, but could
+be the subject of another paper. However, there is evidence to suggest that
+such a paper will not be successful. The allocator and executor customizations
+have the advantage of 13 years of existing practice in Boost, in other open
+source projects, and in commercial settings. They have gone through a couple of
+iterations along the way, in response to real world issues. These customization
+points are not just associated types, but also algorithms to obtain the
+correct instance of the type, which also allows the caller to specify a
+fallback for the case where a selected default is needed. This author has
+not been able to come up with another solution which both maintains the
+expressive power of the TS customization points, and exhibits the same or
+better level of simplicity and elegance. Perhaps someone else will have a
+eureka moment and discover a better way, but it seems unlikely.
+</p></li>
+
+<li><p><b>Can we make these customization points less error-prone?</b></p>
+<p>
+From the author's experience and the visible cascade of problems with the
+example code in this paper, writing initiating functions and composed
+operations correctly requires a demanding amount of experience and skill.
+This is especially true when considering that such algorithms must also
+implicitly exhibit correct behavior in multi-threaded environments. This
+is accomplished by achieving a deep and thorough understanding of Asio or
+[networking.ts] and applying that understanding to code.
+The author and contributors to Boost.Beast have explored library solutions
+to provide some correct boilerplate and higher level idioms to users in order
+to make authoring composed operations easier to write. A little bit of progress
+has been made on this front, but comprehensive improvements have been elusive.
+We suspect that grand unifying solutions simply do not exist, and that the
+level of complexity is inherent to the domain.
+</p></li>
+
+<li><p><b>Should this be spelled <tt>std::experimental::net::bind</tt>?</b></p>
+<p>
+That also solves the problem, but introduce two new ones:
+</p>
+<ul><li>
+Standard libraries now have separate bind implementations which differ only
+in that one of them is TS-aware, and the other isn't.
+</li><li>
+The guidance to users becomes "use this call wrapper, unless you are wrapping
+a completion handler, in which case use this other call wrapper."
+</li></ul>
+<p>
+We find this objectively worse than leveraging the call wrappers which already
+exist in the standard library.
+</p></li>
+
+<li><p><b>How about we remove <tt>std::bind</tt> and add <tt>std::experimental::net::bind</tt>?</b></p>
+<p>
+Functions like <tt>std::bind</tt> which return call wrappers are part of the
+standard library today, and removing them is out of scope for this paper, so
+we do not propose that here.
+</p></li>
+
+<li><p><b>But <tt>std::bind</tt> is bad, I will only accept its deprecation and removal!</b></p>
+<p>
+Technically that isn't a question. We note that the improvements suggested in
+this paper are by no means a show-stopper. [networking.ts] can go on without it,
+and we could always add this in a future revision of the standard if desired.
+Authors of composed operations can write their own call wrapper, or they can
+use the one provided in Boost.Beast which is rapidly gaining popularity for
+its approach of compatibility with [networking.ts] and established practice.
+Regardless, a non-zero fraction of users will reach for <tt>std::bind</tt>
+when authoring library code that accepts instances of completion handlers.
+Without these changes, those users will produce code which is certain to be
+incorrect. Therefore, for as long as the standard library provides functions
+which return call wrappers, it is prudent to ensure that those call wrappers
+are well integrated with [networking.ts].
+</p></li>
+
+</ul>
+
+<a name="Wording"></a><h2>Wording</h2>
+
+<p>This wording is relative to <a href="http://wg21.link/n4734">N4734</a>.</p>
+
+<ol>
+
+<li><p>Modify 13.5 [async.assoc.alloc], as indicated:</p>
+[&hellip;]
+<p><ins>
+-3- The implementation provides partial specializations of
+<tt>associated_allocator</tt> for the forwarding call wrapper types returned
+by <tt>std::bind</tt> and <tt>std::ref</tt>. If <tt>g</tt> of type <tt>G</tt>
+is a forwarding call wrapper with target object <tt>fd</tt> of type <tt>FD</tt>,
+and <tt>a</tt> is a <em>ProtoAllocator</em> of type <tt>PA</tt> then:
+</ins></p>
+<ul>
+<li><ins><tt>associated_allocator&lt;G, PA&gt;::allocator_type</tt> is
+    <tt>associated_allocator&lt;FD, PA&gt;::allocator_type</tt></ins></li>
+<li><ins><tt>associated_allocator&lt;G, PA&gt;::get(g)</tt> returns
+    <tt>associated_allocator&lt;FD, PA&gt;::get(fd)</tt></ins></li>
+<li><ins><tt>associated_allocator&lt;G, PA&gt;::get(g, a)</tt> returns
+    <tt>associated_allocator&lt;FD, PA&gt;::get(fd, a)</tt></ins></li>
+</ul>
+</ins>
+</li>
+
+
+<li><p>Modify 13.12 [async.assoc.exec], as indicated:</p>
+[&hellip;]
+<p><ins>
+-3- The implementation provides partial specializations of
+<tt>associated_allocator</tt> for the forwarding call wrapper types returned
+by <tt>std::bind</tt> and <tt>std::ref</tt>. If <tt>g</tt> of type <tt>G</tt>
+is a forwarding call wrapper with target object <tt>fd</tt> of type <tt>FD</tt>,
+and <tt>e</tt> is a <em>Executor</em> of type <tt>E</tt> then:
+</ins></p>
+<ul>
+<li><ins><tt>associated_executor&lt;G, E&gt;::executor_type</tt> is
+    <tt>associated_executor&lt;FD, E&gt;::executor_type</tt></ins></li>
+<li><ins><tt>associated_executor&lt;G, E&gt;::get(g)</tt> returns
+    <tt>associated_executor&lt;FD, E&gt;::get(fd)</tt></ins></li>
+<li><ins><tt>associated_executor&lt;G, E&gt;::get(g, e)</tt> returns
+    <tt>associated_executor&lt;FD, E&gt;::get(fd, e)</tt></ins></li>
+</ul>
+</li>
+
+</ol>
+
+
+
+<a name="References"></a><h2>References</h2>
+<b>[1]</b>
+<a href="https://github.com/boostorg/asio/blob/fbe86d86b1ac53e40444e5af03ca4a6c74c33bda/include/boost/asio/detail/bind_handler.hpp#L32">https://github.com/boostorg/asio/blob/fbe86d86b1ac53e40444e5af03ca4a6c74c33bda/include/boost/asio/detail/bind_handler.hpp#L32</a><br>
+<br>
+<b>[2]</b>
+<a href="https://github.com/chriskohlhoff/networking-ts-impl/blob/3524b4408d26a67af683bfd2aad6b0b6b5684b36/include/experimental/__net_ts/detail/bind_handler.hpp#L34">https://github.com/chriskohlhoff/networking-ts-impl/blob/3524b4408d26a67af683bfd2aad6b0b6b5684b36/include/experimental/__net_ts/detail/bind_handler.hpp#L34</a><br>
+<br>
+<b>[3]</b>
+<a href="https://www.boost.org/doc/libs/1_67_0/libs/beast/doc/html/beast/ref/boost__beast__bind_handler.html">https://www.boost.org/doc/libs/1_67_0/libs/beast/doc/html/beast/ref/boost__beast__bind_handler.html</a><br>
+<br>
+
+</body>
+</html>
