@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>An Elegant Coroutine Abstraction</title>
+    <style type="text/css">
+    p {text-align:justify}
+    li {text-align:justify}
+    blockquote.note
+    {
+        background-color:#E0E0E0;
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+    }
+    p.note
+    {
+        background-color:#E0E0E0;
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+    }
+    ins { background-color: #CCFFCC; }
+    del { background-color: #FFCCCC; }
+    .insert { background-color: #CCFFCC; }
+    address {text-align:right;}
+    h1 {text-align:center;}
+    span.comment {color:#C80000;}
+    code {white-space:pre;}
+    </style>
+</head>
+<body>
+<pre>
+Doc. no:  TBD
+Audience: LEWG
+Date:     2018-06-19
+Reply-To: Vinnie Falco (<a href="mailto:vinnie.falco@gmail.com">vinnie.falco@gmail.com</a>)
+</pre>
+<hr>
+<h1>An Elegant Coroutine Abstraction</h1>
+
+
+
+<h2>Contents</h2>
+<ul>
+<li><a href="#Abstract">Abstract</a></li>
+<li><a href="#Introduction">Introduction</a>
+<li><a href="#Proposals">Proposals</a>
+<li><a href="#Discussion">Discussion</a>
+<li><a href="#Solution">Solution</a>
+<li><a href="#References">References</a>
+<li><a href="#Listing1">Listing 1</a>
+
+</ul>
+
+
+
+<a name="Abstract"></a><h2>Abstract</h2>
+<p>
+Coroutines enable authors to write code which may be suspended and resumed
+at well defined locations without inverting the flow of control. A preponderance
+of experience shows the need to add this as a language feature, as library-only
+solutions cannot achieve comparable performance and clarity of expression for
+some use cases. Unfortunately, the leading proposal for introducing coroutines
+to the language suffers from significant design flaws. In this paper we
+discuss the design flaws with current proposals, suggest an alternative,
+and provide a framework for how coroutine proposals should be evaluated.
+</p>
+
+
+
+<a name="Introduction"></a><h2>Introduction</h2>
+<p>
+A <em>coroutine</em> is a thread of execution containing well-defined suspend
+points from which the flow of control may be interrupted and resumed.
+A <em>stackful</em> coroutine preserves the stack of the thread of execution
+starting from the entry point to the suspend point. 
+A <em>stackless</em> coroutine preserves a constant amount of state known
+at compile time. Stackful coroutines are uncontroversial, many performant
+implementations have existed as library-only solutions for decades. This
+paper discusses stackless coroutines exclusively; henceforth they are
+referred to simply as "coroutines".
+</p>
+
+<p>
+All coroutine implementations share a common algorithm, called the
+<em>coroutine transformation</em> (henceforth termed "transformation").
+This algorithm takes ordinary code annotated with suspend points and
+inserts additional code allowing the thread of execution to be interrupted
+at each suspend point and later resumed. At a minimum, the transformation
+must store sufficient state to identify the last suspend point from which
+the coroutine should be resumed. An implementation may also choose to
+preserve the values of some or all local variables and function arguments.
+</p>
+
+
+<a name="Proposals"></a><h2>Proposals</h2>
+
+<a name="Discussion"></a><h2>Discussion</h2>
+
+<a name="Solution"></a><h2>Solution</h2>
+
+<a name="References"></a><h2>References</h2>
+
+<a name="Listing1"></a><h2>Listing 1</h2>
+
+</body>
+</html>
