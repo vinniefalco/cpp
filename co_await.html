@@ -31,6 +31,16 @@
     span.comment {color:#C80000;}
     code {white-space:pre;}
     </style>
+<!--
+
+Resumable Expressions
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/n4453.pdf
+
+Coroutines belong in a TS
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0158r0.html
+
+-->
+
 </head>
 <body>
 <pre>
@@ -84,7 +94,6 @@ implementations have existed as library-only solutions for decades. This
 paper discusses stackless coroutines exclusively; henceforth they are
 referred to simply as "coroutines".
 </p>
-
 <p>
 All coroutine implementations share a common algorithm, called the
 <em>coroutine transformation</em> (henceforth termed "transformation").
@@ -94,8 +103,116 @@ at each suspend point and later resumed. At a minimum, the transformation
 must store sufficient state to identify the last suspend point from which
 the coroutine should be resumed. An implementation may also choose to
 preserve the values of some or all local variables and function arguments.
+The following program shows an example of a coroutine:
 </p>
+<blockquote><tt><pre>
+#include &lt;iostream&gt;
+#include "yield.hpp"
 
+struct hello : coroutine
+{
+    void operator()()
+    {
+        reenter(*this)
+        {
+            yield std::cout << "Hello, ";
+            yield std::cout << "world!";
+            yield std::cout.flush();
+        }
+    }
+};
+
+int main()
+{
+    hello c;
+
+    while(! c.is_complete())
+        c();
+}
+</pre></tt></blockquote>
+<p>
+In this example, which prints "Hello, world!", the coroutine is represented
+by the function object <tt>hello</tt>. The coroutine starts out in the
+suspended state, and is resumed by invoking the function call operator.
+The <tt>reenter</tt> keyword denotes the entry point into the coroutine
+body, while the <tt>yield</tt> keyword marks a suspension point. The thread
+of execution will yield (return to the caller) after the statement or block
+following the <tt>yield</tt> keyword executes.
+</p>
+<p>
+It may be surprising to discover that the coroutine interface used above is
+implemented entirely as a library solution, without help from the compiler.
+The listing for the library header file "yield.hpp" may be seen in
+<a href="#Listing1">Listing 1</a>. The <tt>reenter</tt> and <tt>yield</tt>
+keywords are defined as macros. Performing the macro substitutions for the
+function call operator definition above gives us an insight into the structure
+of the transformation:
+</p>
+<blockquote><tt><pre>
+void operator()()
+{
+    switch (::detail::coroutine_ref _coro_value = *this)
+    case -1: if (_coro_value)
+    {
+        goto terminate_coroutine;
+        terminate_coroutine:
+        _coro_value = -1;
+        goto bail_out_of_coroutine;
+        bail_out_of_coroutine:
+        break;
+    } else case 0:
+    {
+            for (_coro_value = (10);;) if (_coro_value == 0) {
+        case (10): ; break; } else
+            switch (_coro_value ? 0 : 1) for (;;)
+            case -1: if (_coro_value) goto terminate_coroutine; else for (;;)
+            case  1: if (_coro_value) goto bail_out_of_coroutine; else
+            case  0:
+        std::cout << "Hello, ";
+            for (_coro_value = (11);;) if (_coro_value == 0) {
+        case (11): ; break; } else
+            switch (_coro_value ? 0 : 1) for (;;)
+            case -1: if (_coro_value) goto terminate_coroutine; else for (;;)
+            case  1: if (_coro_value) goto bail_out_of_coroutine; else
+            case  0:
+        std::cout << "world!";
+            for (_coro_value = (12);;) if (_coro_value == 0) {
+        case (12): ; break; } else
+            switch (_coro_value ? 0 : 1) for (;;)
+            case -1: if (_coro_value) goto terminate_coroutine; else for (;;)
+            case  1: if (_coro_value) goto bail_out_of_coroutine; else
+            case  0:
+        std::cout.flush();
+    }
+}
+</pre></tt></blockquote>
+<p>
+The code in Listing 1 is adapted from the stackless coroutine implementation
+from Boost.Asio[1]. There are some notable limitations. The values of local
+variables are not preserved. The author of the coroutine may preserve state
+by storing local variables as data members of the class instead. Furthermore,
+due to the use of the <tt>goto</tt> and <tt>switch</tt> statements, scopes
+for program blocks must be arranged to avoid jumping across a variable
+initialization.
+</p>
+<p>
+Despite these limitations, this simple macro-based approach has a number of
+strengths. The function is written without inverting the flow of control.
+No dynamic allocations are performed; the coroutine is a plain struct that
+the user may decide where and how the storage is obtained. A coroutine may be
+part of a larger object which is itself a coroutine and also contains other
+coroutines. This mechanism has been used in popular libraries such as
+Boost.Beast[2], allowing highly complex asynchronous composed operations
+to become easier to express and reason about.
+</p>
+<p>
+We show this implementation to demonstrate that cooperation from the compiler
+is not a requirement for performing a general coroutine transformation.
+The transformation fundamentally requires operations which can be expressed
+using existing C++ language flow of control constructs such as <tt>switch</tt>,
+<tt>for</tt>, <tt>break</tt>, and <tt>goto</tt>.
+
+</p>
 
 <a name="Proposals"></a><h2>Proposals</h2>
 
@@ -105,7 +222,73 @@ preserve the values of some or all local variables and function arguments.
 
 <a name="References"></a><h2>References</h2>
 
+<b>[1]</b>
+<a href="https://www.boost.org/doc/libs/1_67_0/doc/html/boost_asio/overview/core/coroutine.html">https://www.boost.org/doc/libs/1_67_0/doc/html/boost_asio/overview/core/coroutine.html</a><br>
+<br>
+
+<b>[2]</b>
+<a href="https://github.com/boostorg/beast/blob/93c35524a6125db3e6aeefc8abc826a810dd5d61/include/boost/beast/websocket/impl/read.ipp#L177">https://github.com/boostorg/beast/blob/93c35524a6125db3e6aeefc8abc826a810dd5d61/include/boost/beast/websocket/impl/read.ipp#L177</a><br>
+<br>
+
+
 <a name="Listing1"></a><h2>Listing 1</h2>
+<tt><pre>
+namespace detail {
+
+struct coroutine_ref;
+
+} // detail
+
+struct coroutine
+{
+    coroutine() : line_(0) {}
+    bool is_done() const { return line_ == -1; }
+
+private:
+    friend struct detail::coroutine_ref;
+    int line_;
+};
+
+namespace detail {
+
+struct coroutine_ref
+{
+    coroutine_ref(coroutine& c) : line_(c.line_), modified_(false) {}
+    ~coroutine_ref() { if (!modified_) line_ = -1; }
+    operator int() const { return line_; }
+    int& operator=(int v) { modified_ = true; return line_ = v; }
+
+private:
+    void operator=(coroutine_ref const&);
+
+    int& line_;
+    bool modified_;
+};
+
+} // detail
+
+#define reenter(c)                                   \
+    switch (::detail::coroutine_ref _coro_value = c) \
+    case -1: if (_coro_value)                        \
+    {                                                \
+        goto terminate_coroutine;                    \
+        terminate_coroutine:                         \
+        _coro_value = -1;                            \
+        goto bail_out_of_coroutine;                  \
+        bail_out_of_coroutine:                       \
+        break;                                       \
+    } else case 0:
+
+#define _yield_impl(n)                                                    \
+        for (_coro_value = (n);;) if (_coro_value == 0) {                 \
+    case (n): ; break; } else                                             \
+        switch (_coro_value ? 0 : 1) for (;;)                             \
+        case -1: if (_coro_value) goto terminate_coroutine; else for (;;) \
+        case  1: if (_coro_value) goto bail_out_of_coroutine; else        \
+        case  0:
+
+#define yield _yield_impl(__LINE__)
+</pre></tt>
 
 </body>
 </html>
