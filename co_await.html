@@ -179,33 +179,31 @@ void operator()()
 <p>
 The code in Listing 1 is adapted from the stackless coroutine implementation
 from Boost.Asio[1]. There are some notable limitations. The values of local
-variables are not preserved. The author of the coroutine may preserve state
-by storing local variables as data members of the class instead. Furthermore,
-due to the use of the <tt>goto</tt> and <tt>switch</tt> statements, scopes
-for program blocks must be arranged to avoid jumping across a variable
-initialization.
+variables are not preserved. State may be manually preserved by storing local
+variables as data members of the class instead. Furthermore, due to the inserted
+<tt>goto</tt> and <tt>switch</tt> statements, code blocks must be arranged to
+avoid jumping across a variable initialization.
 </p>
 <p>
 Despite these limitations, this simple macro-based approach has a number of
 strengths. The function is written without inverting the flow of control.
-The coroutine is a plain old struct. No dynamic allocations are performed;
-the user may decide where and how the to place the object. A coroutine may be
-part of a larger object which is itself a coroutine and also contains other
+The coroutine is a plain struct. No dynamic allocations are performed, and
+the user decides where and how the object is placed. A coroutine may be part
+of a larger object which is itself a coroutine and also contains other
 coroutines. This mechanism has been used in popular libraries such as
-Boost.Beast[2], allowing highly complex asynchronous composed operations
-to become easier to express and reason about.
+Boost.Beast[2], making complex asynchronous operations easier to express
+and reason about.
 </p>
 <p>
 This particular implementation is presented to demonstrate that assistance
 from the compiler is not required to perform the coroutine transformation.
-Fundamentally, the coroutine can be expressed using existing C++ language
-constructs. An implementation must provide a transformation with the following
-features, otherwise a coroutine cannot be expressed:
+It be expressed using existing C++ language constructs. The minimal set of
+features a coroutine transformation must provide are as follows:
 </p>
 <ul>
 <li>A means to annotate suspend points within a function</li>
 <li>An object to represent the coroutine and its state</li>
-<li>An interface to resume the coroutine</li>
+<li>Interfaces to query and control the coroutine's execution</li>
 </ul>
 <p>
 We use the term coroutine to also refer to the object produced by the
@@ -218,18 +216,14 @@ An abstraction with no additional features is termed a <em>minimal abstraction</
 </p>
 <p>
 While a minimal abstraction is functional, it is not something which typical
-users would want to interact with directly. Most users want to use features
-provided by higher level abstractions such as futures, generators, and
-iterators. Furthermore, there is great interest in using coroutines with
-libraries offering asynchronous interfaces for performing networking or
-other I/O.
-</p>
-<p>
-These higher level abstractions of coroutines may be part of a coroutine
-abstraction, or they can be provided as library components which use a
-minimal abstraction. We use the term <em>coroutine middleware</em> (or
-just "middleware") to describe additional language or library elements
-whose functionality does not overlap the minimal abstraction.
+users would want to interact with directly. Most users want higher-level
+abstractions such as futures, generators, and iterators. Furthermore,
+there is great interest in using coroutines with libraries that perform
+asynchronous networking or I/O. These higher level abstractions may be part
+of a coroutine abstraction, or they can be provided as library components
+built on a minimal abstraction. We use the term <em>coroutine middleware</em>
+(or just "middleware") to describe additional language or library elements
+whose functionality goes beyond the minimal abstraction described above.
 </p>
 
 <a name="History"></a><h2>History</h2>
