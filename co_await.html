@@ -31,16 +31,6 @@
     span.comment {color:#C80000;}
     code {white-space:pre;}
     </style>
-<!--
-
-Resumable Expressions
-http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/n4453.pdf
-
-Coroutines belong in a TS
-http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0158r0.html
-
--->
-
 </head>
 <body>
 <pre>
@@ -58,7 +48,7 @@ Reply-To: Vinnie Falco (<a href="mailto:vinnie.falco@gmail.com">vinnie.falco@gma
 <ul>
 <li><a href="#Abstract">Abstract</a></li>
 <li><a href="#Introduction">Introduction</a>
-<li><a href="#Proposals">Proposals</a>
+<li><a href="#History">History</a>
 <li><a href="#Discussion">Discussion</a>
 <li><a href="#Solution">Solution</a>
 <li><a href="#References">References</a>
@@ -198,23 +188,68 @@ initialization.
 <p>
 Despite these limitations, this simple macro-based approach has a number of
 strengths. The function is written without inverting the flow of control.
-No dynamic allocations are performed; the coroutine is a plain struct that
-the user may decide where and how the storage is obtained. A coroutine may be
+The coroutine is a plain old struct. No dynamic allocations are performed;
+the user may decide where and how the to place the object. A coroutine may be
 part of a larger object which is itself a coroutine and also contains other
 coroutines. This mechanism has been used in popular libraries such as
 Boost.Beast[2], allowing highly complex asynchronous composed operations
 to become easier to express and reason about.
 </p>
 <p>
-We show this implementation to demonstrate that cooperation from the compiler
-is not a requirement for performing a general coroutine transformation.
-The transformation fundamentally requires operations which can be expressed
-using existing C++ language flow of control constructs such as <tt>switch</tt>,
-<tt>for</tt>, <tt>break</tt>, and <tt>goto</tt>.
-
+This particular implementation is presented to demonstrate that assistance
+from the compiler is not required to perform the coroutine transformation.
+Fundamentally, the coroutine can be expressed using existing C++ language
+constructs. An implementation must provide a transformation with the following
+features, otherwise a coroutine cannot be expressed:
+</p>
+<ul>
+<li>A means to annotate suspend points within a function</li>
+<li>An object to represent the coroutine and its state</li>
+<li>An interface to resume the coroutine</li>
+</ul>
+<p>
+We use the term coroutine to also refer to the object produced by the
+transformation, and the term <em>coroutine abstraction</em> (henceforth
+termed "abstraction") to refer to the interface offered by a particular
+implementation for creating and interacting with the coroutine. While an
+abstraction may include additional features (such retaining local variables
+across suspend points), these features are not required as demonstrated above.
+An abstraction with no additional features is termed a <em>minimal abstraction</em>
+</p>
+<p>
+While a minimal abstraction is functional, it is not something which typical
+users would want to interact with directly. Most users want to use features
+provided by higher level abstractions such as futures, generators, and
+iterators. Furthermore, there is great interest in using coroutines with
+libraries offering asynchronous interfaces for performing networking or
+other I/O.
+</p>
+<p>
+These higher level abstractions of coroutines may be part of a coroutine
+abstraction, or they can be provided as library components which use a
+minimal abstraction. We use the term <em>coroutine middleware</em> (or
+just "middleware") to describe additional language or library elements
+whose functionality does not overlap the minimal abstraction.
 </p>
 
-<a name="Proposals"></a><h2>Proposals</h2>
+<a name="History"></a><h2>History</h2>
+
+<!--
+
+Resumable Expressions
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/n4453.pdf
+
+Coroutines belong in a TS
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0158r0.html
+
+-->
+
+<p>
+As coroutines offer a powerful and performant programming model, an
+important goal of WG21 is to finalize a coroutine specification suitable
+for standardisation. Here we discuss the history of selected coroutine
+proposals, and the current state of coroutines.
+</p>
 
 <a name="Discussion"></a><h2>Discussion</h2>
 
