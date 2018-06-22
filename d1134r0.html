@@ -179,10 +179,10 @@ void operator()()
 <p>
 The code in Listing 1 is adapted from the stackless coroutine implementation
 from Boost.Asio[1]. There are some notable limitations. The values of local
-variables are not preserved. State may be manually preserved by storing local
-variables as data members of the class instead. Furthermore, due to the inserted
-<tt>goto</tt> and <tt>switch</tt> statements, code blocks must be arranged to
-avoid jumping across a variable initialization.
+variables are not automatically preserved; they must be manually saved by
+using class data members instead. Furthermore, due to the inserted
+<tt>goto</tt> and <tt>switch</tt> statements, code blocks must be
+arranged to avoid jumps across variable initializations.
 </p>
 <p>
 Despite these limitations, this simple macro-based approach has a number of
@@ -217,10 +217,10 @@ An abstraction with no additional features is termed a <em>minimal abstraction</
 <p>
 While a minimal abstraction is functional, it is not something which typical
 users would want to interact with directly. Most users want higher-level
-abstractions such as futures, generators, and iterators. Furthermore,
-there is great interest in using coroutines with libraries that perform
-asynchronous networking or I/O. These higher level abstractions may be part
-of a coroutine abstraction, or they can be provided as library components
+abstractions such as futures, generators, and iterators. There is also great
+interest in using coroutines with libraries that perform asynchronous
+networking or other I/O. These higher level abstractions may be part of
+a coroutine abstraction, or they can be provided as library components
 built on a minimal abstraction. We use the term <em>coroutine middleware</em>
 (or just "middleware") to describe additional language or library elements
 whose functionality goes beyond the minimal abstraction described above.
