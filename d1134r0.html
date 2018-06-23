@@ -52,6 +52,7 @@ Reply-To: Vinnie Falco (<a href="mailto:vinnie.falco@gmail.com">vinnie.falco@gma
 <li><a href="#Discussion">Discussion</a>
 <li><a href="#Solution">Solution</a>
 <li><a href="#References">References</a>
+<li><a href="#Acknowledgements">Acknowledgements</a>
 <li><a href="#Listing1">Listing 1</a>
 
 </ul>
@@ -96,18 +97,19 @@ preserve the values of some or all local variables and function arguments.
 The following program shows an example of a coroutine:
 </p>
 <blockquote><tt><pre>
+#include "coroutine.hpp"
+
 #include &lt;iostream&gt;
-#include "yield.hpp"
 
 struct hello : coroutine
 {
     void operator()()
     {
-        reenter(*this)
+        co_enter(*this)
         {
-            yield std::cout << "Hello, ";
-            yield std::cout << "world!";
-            yield std::cout.flush();
+            co_await std::cout << "Hello, ";
+            co_await std::cout << "world!";
+            co_await std::cout.flush();
         }
     }
 };
@@ -116,7 +118,7 @@ int main()
 {
     hello c;
 
-    while(! c.is_complete())
+    while(! c.await_ready())
         c();
 }
 </pre></tt></blockquote>
@@ -124,18 +126,18 @@ int main()
 In this example, which prints "Hello, world!", the coroutine is represented
 by the function object <tt>hello</tt>. The coroutine starts out in the
 suspended state, and is resumed by invoking the function call operator.
-The <tt>reenter</tt> keyword denotes the entry point into the coroutine
-body, while the <tt>yield</tt> keyword marks a suspension point. The thread
-of execution will yield (return to the caller) after the statement or block
-following the <tt>yield</tt> keyword executes.
+The <tt>co_enter</tt> keyword denotes the entry point into the coroutine
+body, while the <tt>co_await</tt> keyword marks a suspension point. The
+thread of execution will suspend (return to the caller) after the statement
+or block following the <tt>co_await</tt> keyword executes.
 </p>
 <p>
 It may be surprising to discover that the coroutine interface used above is
 implemented entirely as a library solution, without help from the compiler.
-The listing for the library header file "yield.hpp" may be seen in
-<a href="#Listing1">Listing 1</a>. The <tt>reenter</tt> and <tt>yield</tt>
-keywords are defined as macros. Performing the macro substitutions for the
-function call operator definition above gives us an insight into the structure
+The source code for the library header file "coroutine.hpp" may be seen in
+<a href="#Listing1">Listing 1</a>. The <tt>co_enter</tt> and <tt>co_await</tt>
+keywords are defined as macros. Performing the macro substitutions in the
+function call operator definition above gives us insight into the structure
 of the transformation:
 </p>
 <blockquote><tt><pre>
@@ -197,8 +199,8 @@ and reason about.
 <p>
 This particular implementation is presented to demonstrate that assistance
 from the compiler is not required to perform the coroutine transformation.
-It be expressed using existing C++ language constructs. The minimal set of
-features a coroutine transformation must provide are as follows:
+It can be expressed using existing C++ language constructs. The minimal set
+of features a coroutine transformation must provide are as follows:
 </p>
 <ul>
 <li>A means to annotate suspend points within a function</li>
@@ -245,9 +247,15 @@ for standardisation. Here we discuss the history of selected coroutine
 proposals, and the current state of coroutines.
 </p>
 
+
+
 <a name="Discussion"></a><h2>Discussion</h2>
 
+
+
 <a name="Solution"></a><h2>Solution</h2>
+
+
 
 <a name="References"></a><h2>References</h2>
 
@@ -260,8 +268,17 @@ proposals, and the current state of coroutines.
 <br>
 
 
+
+<a name="Acknowledgements"></a><h2>Acknowledgements 1</h2>
+
+
+
 <a name="Listing1"></a><h2>Listing 1</h2>
 <tt><pre>
+//
+// Filename: "coroutine.hpp"
+//
+
 namespace detail {
 
 struct coroutine_ref;
@@ -271,7 +288,7 @@ struct coroutine_ref;
 struct coroutine
 {
     coroutine() : line_(0) {}
-    bool is_done() const { return line_ == -1; }
+    bool await_ready() const { return line_ == -1; }
 
 private:
     friend struct detail::coroutine_ref;
@@ -296,7 +313,7 @@ private:
 
 } // detail
 
-#define reenter(c)                                   \
+#define co_enter(c)                                  \
     switch (::detail::coroutine_ref _coro_value = c) \
     case -1: if (_coro_value)                        \
     {                                                \
@@ -308,7 +325,7 @@ private:
         break;                                       \
     } else case 0:
 
-#define _yield_impl(n)                                                    \
+#define _co-await_impl(n)                                                 \
         for (_coro_value = (n);;) if (_coro_value == 0) {                 \
     case (n): ; break; } else                                             \
         switch (_coro_value ? 0 : 1) for (;;)                             \
@@ -316,7 +333,7 @@ private:
         case  1: if (_coro_value) goto bail_out_of_coroutine; else        \
         case  0:
 
-#define yield _yield_impl(__LINE__)
+#define co_await _co_await_impl(__LINE__)
 </pre></tt>
 
 </body>
