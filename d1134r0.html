@@ -50,7 +50,7 @@ Reply-To: Vinnie Falco (<a href="mailto:vinnie.falco@gmail.com">vinnie.falco@gma
 <li><a href="#Introduction">Introduction</a>
 <li><a href="#History">History</a>
 <li><a href="#Discussion">Discussion</a>
-<li><a href="#Solution">Solution</a>
+<li><a href="#Analysis">Analysis</a>
 <li><a href="#References">References</a>
 <li><a href="#Acknowledgements">Acknowledgements</a>
 <li><a href="#Listing1">Listing 1</a>
@@ -75,8 +75,8 @@ and provide a framework for how coroutine proposals should be evaluated.
 
 <a name="Introduction"></a><h2>Introduction</h2>
 <p>
-A <em>coroutine</em> is a thread of execution containing well-defined suspend
-points from which the flow of control may be interrupted and resumed.
+A <em>coroutine</em> is a thread of execution containing well-defined
+suspend points from which the flow of control may be paused and resumed.
 A <em>stackful</em> coroutine preserves the stack of the thread of execution
 starting from the entry point to the suspend point. 
 A <em>stackless</em> coroutine preserves a constant amount of state known
@@ -89,7 +89,7 @@ referred to simply as "coroutines".
 All coroutine implementations share a common algorithm, called the
 <em>coroutine transformation</em> (henceforth termed "transformation").
 This algorithm takes ordinary code annotated with suspend points and
-inserts additional code allowing the thread of execution to be interrupted
+inserts additional code allowing the thread of execution to be paused
 at each suspend point and later resumed. At a minimum, the transformation
 must store sufficient state to identify the last suspend point from which
 the coroutine should be resumed. An implementation may also choose to
@@ -199,13 +199,18 @@ and reason about.
 <p>
 This particular implementation is presented to demonstrate that assistance
 from the compiler is not required to perform the coroutine transformation.
-It can be expressed using existing C++ language constructs. The minimal set
-of features a coroutine transformation must provide are as follows:
+It can be expressed using existing C++ language constructs. A transformation
+needs to implement a set of required features, otherwise the functionality
+of a coroutine cannot be achieved. A transformation may provide additional
+features besides the required ones, but it is not necessary to do so. Those
+features are as follows:
 </p>
 <ul>
 <li>A means to annotate suspend points within a function</li>
 <li>An object to represent the coroutine and its state</li>
-<li>Interfaces to query and control the coroutine's execution</li>
+<li>A way to resume the coroutine</li>
+<li>A way to know if the coroutine has completed</li>
+<li>A method to obtain the final return value, when complete</li>
 </ul>
 <p>
 We use the term coroutine to also refer to the object produced by the
@@ -253,7 +258,24 @@ proposals, and the current state of coroutines.
 
 
 
-<a name="Solution"></a><h2>Solution</h2>
+<a name="Analysis"></a><h2>Analysis</h2>
+
+
+
+Against co_await
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0158r0.html
+
+
+
+WG21 Meeting 53 Minutes
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2012/n3380.pdf
+
+
+There is a disturbing trend seen in comments from WG21 participants on social
+media and in meetings.
+observed in the WG21 committee proceedings and
+comments from 
+
 
 
 
